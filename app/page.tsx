@@ -30,6 +30,11 @@ export default function Home() {
   const [actions, setActions] = useState<Action[]>([])
   const [loading, setLoading] = useState(false)
   const [loadingMsg, setLoadingMsg] = useState('')
+  const [consoleOpen, setConsoleOpen] = useState(false)
+  const [question, setQuestion] = useState('')
+  const [answer, setAnswer] = useState('')
+  const [consoleLoading, setConsoleLoading] = useState(false)
+
   const imageRef = useRef<HTMLInputElement>(null)
   const whatsappRef = useRef<HTMLInputElement>(null)
   const docRef = useRef<HTMLInputElement>(null)
@@ -43,7 +48,7 @@ export default function Home() {
     })
     const data = await res.json()
     if (data.error) alert('Error: ' + data.error)
-    setActions(data.actions || [])
+    setActions(prev => [...prev, ...(data.actions || [])])
   }
 
   const handleExtract = async () => {
@@ -143,6 +148,24 @@ export default function Home() {
     setLoadingMsg('')
   }
 
+  const handleConsole = async () => {
+    if (!question.trim()) return
+    setConsoleLoading(true)
+    try {
+      const res = await fetch('/api/console', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question }),
+      })
+      const data = await res.json()
+      if (data.error) alert('Error: ' + data.error)
+      setAnswer(data.answer || '')
+    } catch (err) {
+      alert('Something went wrong: ' + err)
+    }
+    setConsoleLoading(false)
+  }
+
   const urgent = actions.filter(a => a.urgency === 'urgent')
   const normal = actions.filter(a => a.urgency === 'normal')
 
@@ -235,8 +258,52 @@ export default function Home() {
               </div>
             )}
 
+            <button
+              onClick={() => setActions([])}
+              className="text-sm text-gray-400 hover:text-gray-600 transition"
+            >
+              Clear all
+            </button>
+
           </div>
         )}
+
+        {/* AI Console */}
+        <div className="mt-8 border border-gray-200 rounded-xl bg-white shadow-sm">
+          <button
+            onClick={() => setConsoleOpen(!consoleOpen)}
+            className="w-full p-4 text-left font-medium text-gray-700 flex items-center justify-between"
+          >
+            <span>🤖 AI Console</span>
+            <span className="text-gray-400">{consoleOpen ? '▲' : '▼'}</span>
+          </button>
+
+          {consoleOpen && (
+            <div className="px-4 pb-4 space-y-3">
+              <input
+                type="text"
+                className="w-full p-3 border border-gray-200 rounded-xl text-gray-800 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black"
+                placeholder="Ask anything... e.g. What's due today? Show Sam's tasks."
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleConsole()}
+              />
+              <button
+                onClick={handleConsole}
+                disabled={consoleLoading}
+                className="w-full bg-black text-white py-2.5 rounded-xl font-medium hover:bg-gray-800 disabled:opacity-50 transition"
+              >
+                {consoleLoading ? 'Thinking...' : 'Ask AI'}
+              </button>
+              {answer && (
+                <div className="p-3 bg-gray-50 rounded-xl text-sm text-gray-700 whitespace-pre-wrap">
+                  {answer}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
       </div>
     </main>
   )
