@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
-import { supabase } from '@/lib/supabase'
+import { createSupabaseServerClient } from '@/lib/supabase-server'
 
 const openrouter = createOpenAI({
     baseURL: 'https://openrouter.ai/api/v1',
@@ -10,31 +10,50 @@ const openrouter = createOpenAI({
 
 export async function POST(req: NextRequest) {
     try {
-        const { question } = await req.json()
+        const { message, history } = await req.json()
 
-        const { data: actions, error } = await supabase
+        // Get logged in user via server client (reads cookies)
+        const serverSupabase = await createSupabaseServerClient()
+        const { data: { user } } = await serverSupabase.auth.getUser()
+        if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+
+        const currentUser = user.user_metadata?.full_name || user.email?.split('@')[0] || 'Founder'
+
+        // Fetch ONLY this user's actions (RLS handles it automatically)
+        const { data: actions } = await serverSupabase
             .from('actions')
             .select('*')
             .order('created_at', { ascending: false })
             .limit(50)
 
-        if (error) return Response.json({ error: error.message }, { status: 500 })
+        const actionsContext = actions?.length
+            ? actions.map(a =>
+                `- ${a.title} (${a.priority} priority, ${a.type}, ${a.status}${a.owner ? ', owner: ' + a.owner : ''}${a.due_date ? ', due: ' + a.due_date : ''})`
+            ).join('\n')
+            : 'No actions yet.'
+
+        // Build conversation history text
+        const historyText = (history || [])
+            .map((m: { role: string; content: string }) =>
+                `${m.role === 'user' ? currentUser : 'Assistant'}: ${m.content}`)
+            .join('\n')
 
         const { text } = await generateText({
-            model: openrouter('google/gemini-2.0-flash-001'),
-            prompt: `You are an AI assistant for a startup founder.
-You have access to their current action items listed below.
-Answer their question clearly and concisely based on this data.
-If they ask to summarize, list, or filter — do it cleanly.
-If they ask something unrelated to the actions, politely redirect.
+            model: openrouter('openrouter/auto'),
+            prompt: `You are an AI assistant for ${currentUser}, an early-stage startup founder using Founders Stack.
+You have access to ${currentUser}'s current action items:
 
-Current Actions:
-${JSON.stringify(actions, null, 2)}
+${actionsContext}
 
-Founder's question: "${question}"`,
+Answer clearly and concisely. If they ask about urgent items, priorities, owners, or summaries — use the data above.
+Keep responses short (2-4 sentences max). Address the founder as ${currentUser} when relevant.
+
+${historyText ? `Conversation so far:\n${historyText}\n` : ''}
+${currentUser}: ${message}
+Assistant:`,
         })
 
-        return Response.json({ answer: text })
+        return Response.json({ reply: text.trim() })
 
     } catch (err: any) {
         console.error('Console API error:', err)

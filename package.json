@@ -13,6 +13,8 @@
     "@ai-sdk/google": "^3.0.64",
     "@ai-sdk/groq": "^3.0.35",
     "@ai-sdk/openai": "^3.0.53",
+    "@supabase/auth-helpers-nextjs": "^0.15.0",
+    "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.104.1",
     "ai": "^6.0.168",
     "groq-sdk": "^1.1.2",
