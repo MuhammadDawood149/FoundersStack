@@ -1,0 +1,415 @@
+package business;
+
+public class Product {
+
+    private String id;
+    private String name;
+    private String category;
+    private double price;
+    private int stock;
+
+    public Product(String id, String name, String category, double price, int stock) {
+        this.id = id;
+        this.name = name;
+        this.category = category;
+        this.price = price;
+        this.stock = stock;
+    }
+
+    // Business rule: check if enough stock is available
+    public boolean hasEnoughStock(int quantity) {
+        return quantity > 0 && quantity <= stock;
+    }
+
+    // Business rule: reduce stock after a purchase
+    public void reduceStock(int quantity) {
+        if (!hasEnoughStock(quantity)) {
+            throw new IllegalArgumentException("Insufficient stock. Available: " + stock);
+        }
+        this.stock -= quantity;
+    }
+
+    // Business rule: calculate total price for a quantity
+    public double calculateTotal(int quantity) {
+        return this.price * quantity;
+    }
+
+    // Getters
+    public String getId()       { return id; }
+    public String getName()     { return name; }
+    public String getCategory() { return category; }
+    public double getPrice()    { return price; }
+    public int getStock()       { return stock; }
+}
+
+package business;
+
+import dataaccess.ProductRepository;
+import java.util.ArrayList;
+
+public class ProductService {
+
+    private final ProductRepository repository;
+    private ArrayList<Product> products;
+
+    public ProductService(String csvPath) {
+        this.repository = new ProductRepository(csvPath);
+        this.products = repository.loadAll();
+    }
+
+    // Use case: get all products
+    public ArrayList<Product> getAllProducts() {
+        return products;
+    }
+
+    // Use case: search by name or category
+    public ArrayList<Product> search(String keyword) {
+        ArrayList<Product> results = new ArrayList<Product>();
+        String lower = keyword.toLowerCase().trim();
+        for (Product p : products) {
+            if (lower.length() == 0 ||
+                p.getName().toLowerCase().indexOf(lower) >= 0 ||
+                p.getCategory().toLowerCase().indexOf(lower) >= 0) {
+                results.add(p);
+            }
+        }
+        return results;
+    }
+
+    // Use case: buy a product
+    public String buy(String productId, int quantity) {
+
+        // Find product
+        Product selected = null;
+        for (Product p : products) {
+            if (p.getId().equalsIgnoreCase(productId)) {
+                selected = p;
+                break;
+            }
+        }
+
+        if (selected == null) {
+            return "ERROR: Product not found.";
+        }
+
+        // Business rule check
+        if (!selected.hasEnoughStock(quantity)) {
+            return "ERROR: Insufficient stock. Available: " + selected.getStock();
+        }
+
+        // Execute business rules
+        double total = selected.calculateTotal(quantity);
+        selected.reduceStock(quantity);
+
+        // Build receipt
+        StringBuilder receipt = new StringBuilder();
+        receipt.append("PURCHASE SUCCESSFUL\n");
+        receipt.append("-----------------------------\n");
+        receipt.append("Product ID   : ").append(selected.getId()).append("\n");
+        receipt.append("Name         : ").append(selected.getName()).append("\n");
+        receipt.append("Category     : ").append(selected.getCategory()).append("\n");
+        receipt.append("Unit Price   : ").append(selected.getPrice()).append("\n");
+        receipt.append("Quantity     : ").append(quantity).append("\n");
+        receipt.append("Total        : ").append(total).append("\n");
+        receipt.append("Remaining Stock: ").append(selected.getStock()).append("\n");
+        return receipt.toString();
+    }
+
+    // Use case: save all products to CSV
+    public boolean saveToCSV() {
+        return repository.saveAll(products);
+    }
+
+    // Use case: reload products from CSV
+    public void reloadFromCSV() {
+        products = repository.loadAll();
+    }
+
+    public int getProductCount() {
+        return products.size();
+    }
+}
+
+package dataaccess;
+
+import business.Product;
+import java.io.*;
+import java.util.ArrayList;
+
+public class ProductRepository {
+
+    private final String csvPath;
+
+    public ProductRepository(String csvPath) {
+        this.csvPath = csvPath;
+    }
+
+    public ArrayList<Product> loadAll() {
+        ArrayList<Product> products = new ArrayList<Product>();
+        File csvFile = new File(csvPath);
+
+        // Create default CSV if it doesn't exist
+        if (!csvFile.exists()) {
+            createDefaultCSV(csvFile);
+        }
+
+        BufferedReader reader = null;
+        try {
+            reader = new BufferedReader(new FileReader(csvFile));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.trim().length() > 0) {
+                    String[] parts = line.split(",");
+                    if (parts.length == 5) {
+                        try {
+                            String id       = parts[0].trim();
+                            String name     = parts[1].trim();
+                            String category = parts[2].trim();
+                            double price    = Double.parseDouble(parts[3].trim());
+                            int stock       = Integer.parseInt(parts[4].trim());
+                            products.add(new Product(id, name, category, price, stock));
+                        } catch (NumberFormatException e) {
+                            // skip corrupt lines
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            if (reader != null) {
+                try { reader.close(); } catch (IOException e) { e.printStackTrace(); }
+            }
+        }
+
+        return products;
+    }
+
+    public boolean saveAll(ArrayList<Product> products) {
+        BufferedWriter writer = null;
+        try {
+            writer = new BufferedWriter(new FileWriter(new File(csvPath)));
+            for (Product p : products) {
+                writer.write(p.getId() + "," + p.getName() + "," +
+                             p.getCategory() + "," + p.getPrice() + "," + p.getStock());
+                writer.newLine();
+            }
+            return true;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        } finally {
+            if (writer != null) {
+                try { writer.close(); } catch (IOException e) { e.printStackTrace(); }
+            }
+        }
+    }
+
+    private void createDefaultCSV(File csvFile) {
+        BufferedWriter writer = null;
+        try {
+            writer = new BufferedWriter(new FileWriter(csvFile));
+            writer.write("P101,Notebook,Stationery,250.0,20");   writer.newLine();
+            writer.write("P102,Pen,Stationery,50.0,100");        writer.newLine();
+            writer.write("P103,Mouse,Electronics,1200.0,15");    writer.newLine();
+            writer.write("P104,Keyboard,Electronics,2500.0,10"); writer.newLine();
+            writer.write("P105,Water Bottle,Utility,800.0,25");  writer.newLine();
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            if (writer != null) {
+                try { writer.close(); } catch (IOException e) { e.printStackTrace(); }
+            }
+        }
+    }
+}
+
+package ui;
+
+import business.Product;
+import business.ProductService;
+
+import java.awt.*;
+import java.awt.event.*;
+import java.util.ArrayList;
+
+public class StoreFrame {
+
+    private final ProductService service;
+
+    // UI Components
+    private Frame frame;
+    private TextField searchField;
+    private TextField idField;
+    private TextField qtyField;
+    private TextArea displayArea;
+    private Label messageLabel;
+    private Label statsLabel;
+
+    public StoreFrame(String csvPath) {
+        this.service = new ProductService(csvPath);
+        buildUI();
+        showAllProducts();
+    }
+
+    private void buildUI() {
+        frame = new Frame("Layered Store App - AWT");
+        frame.setSize(900, 650);
+        frame.setLayout(new BorderLayout());
+        frame.setBackground(Color.lightGray);
+
+        // --- Top Panel ---
+        Panel topPanel = new Panel(new GridLayout(4, 1));
+
+        // Search row
+        Panel searchPanel = new Panel(new FlowLayout(FlowLayout.LEFT));
+        searchField = new TextField(20);
+        Button searchButton  = new Button("Search");
+        Button showAllButton = new Button("Show All");
+        searchPanel.add(new Label("Search (name/category): "));
+        searchPanel.add(searchField);
+        searchPanel.add(searchButton);
+        searchPanel.add(showAllButton);
+
+        // Buy row
+        Panel orderPanel = new Panel(new FlowLayout(FlowLayout.LEFT));
+        idField  = new TextField(10);
+        qtyField = new TextField(10);
+        Button buyButton = new Button("Buy");
+        orderPanel.add(new Label("Product ID: "));
+        orderPanel.add(idField);
+        orderPanel.add(new Label("Quantity: "));
+        orderPanel.add(qtyField);
+        orderPanel.add(buyButton);
+
+        // File row
+        Panel filePanel = new Panel(new FlowLayout(FlowLayout.LEFT));
+        Button reloadButton = new Button("Reload CSV");
+        Button saveButton   = new Button("Save CSV");
+        filePanel.add(reloadButton);
+        filePanel.add(saveButton);
+
+        // Stats row
+        Panel statsPanel = new Panel(new FlowLayout(FlowLayout.LEFT));
+        statsLabel = new Label("Products loaded: " + service.getProductCount());
+        statsPanel.add(statsLabel);
+
+        topPanel.add(searchPanel);
+        topPanel.add(orderPanel);
+        topPanel.add(filePanel);
+        topPanel.add(statsPanel);
+
+        // --- Center ---
+        displayArea = new TextArea("", 25, 100, TextArea.SCROLLBARS_BOTH);
+        displayArea.setEditable(false);
+
+        // --- Bottom ---
+        messageLabel = new Label("Ready.");
+
+        frame.add(topPanel, BorderLayout.NORTH);
+        frame.add(displayArea, BorderLayout.CENTER);
+        frame.add(messageLabel, BorderLayout.SOUTH);
+
+        // --- Event Listeners (delegates everything to Business layer) ---
+
+        searchButton.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                String keyword = searchField.getText().trim();
+                ArrayList<Product> results = service.search(keyword);
+                displayProducts(results);
+                messageLabel.setText("Search completed. Matches found: " + results.size());
+            }
+        });
+
+        showAllButton.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                showAllProducts();
+            }
+        });
+
+        buyButton.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                String productId = idField.getText().trim();
+                String qtyText   = qtyField.getText().trim();
+
+                if (productId.length() == 0 || qtyText.length() == 0) {
+                    messageLabel.setText("Please enter product ID and quantity.");
+                    return;
+                }
+
+                int quantity;
+                try {
+                    quantity = Integer.parseInt(qtyText);
+                } catch (NumberFormatException ex) {
+                    messageLabel.setText("Quantity must be a valid integer.");
+                    return;
+                }
+
+                if (quantity <= 0) {
+                    messageLabel.setText("Quantity must be greater than zero.");
+                    return;
+                }
+
+                // Delegate to Business layer
+                String result = service.buy(productId, quantity);
+                displayArea.setText(result);
+
+                if (result.startsWith("ERROR")) {
+                    messageLabel.setText(result);
+                } else {
+                    statsLabel.setText("Products loaded: " + service.getProductCount());
+                    messageLabel.setText("Purchase completed. Remember to click Save CSV.");
+                }
+            }
+        });
+
+        saveButton.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                boolean success = service.saveToCSV();
+                messageLabel.setText(success ? "Data saved to CSV successfully."
+                                             : "Error while saving CSV.");
+            }
+        });
+
+        reloadButton.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                service.reloadFromCSV();
+                showAllProducts();
+                messageLabel.setText("CSV reloaded successfully.");
+            }
+        });
+
+        frame.addWindowListener(new WindowAdapter() {
+            public void windowClosing(WindowEvent e) {
+                frame.dispose();
+                System.exit(0);
+            }
+        });
+
+        frame.setVisible(true);
+    }
+
+    private void showAllProducts() {
+        displayProducts(service.getAllProducts());
+        statsLabel.setText("Products loaded: " + service.getProductCount());
+        messageLabel.setText("Showing all products.");
+    }
+
+    private void displayProducts(ArrayList<Product> list) {
+        StringBuilder text = new StringBuilder();
+        text.append("ID\tName\t\tCategory\tPrice\tStock\n");
+        text.append("---------------------------------------------------------------\n");
+        for (Product p : list) {
+            text.append(p.getId()).append("\t")
+                .append(p.getName()).append("\t\t")
+                .append(p.getCategory()).append("\t\t")
+                .append(p.getPrice()).append("\t")
+                .append(p.getStock()).append("\n");
+        }
+        displayArea.setText(text.toString());
+    }
+
+    public static void main(String[] args) {
+        new StoreFrame("C:\\temp\\products.csv");
+    }
+}
