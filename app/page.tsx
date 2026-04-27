@@ -8,71 +8,139 @@ type Action = {
   owner?: string
   priority: 'high' | 'medium' | 'low'
   due_date?: string
+  type?: string
+  urgency?: string
   status: string
-  type: 'task' | 'follow-up' | 'reminder'
-  urgency: 'urgent' | 'normal'
 }
 
-type InputMode = 'text' | 'whatsapp'
+const priorityColors = {
+  high: 'bg-red-100 text-red-700 border-red-200',
+  medium: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+  low: 'bg-green-100 text-green-700 border-green-200',
+}
+
+const typeIcons: Record<string, string> = {
+  task: '✓',
+  'follow-up': '↩',
+  reminder: '⏰',
+}
 
 export default function Home() {
-  const [mode, setMode] = useState<InputMode>('text')
   const [input, setInput] = useState('')
-  const [fileName, setFileName] = useState<string | null>(null)
   const [actions, setActions] = useState<Action[]>([])
   const [loading, setLoading] = useState(false)
-  const [loadingMessage, setLoadingMessage] = useState('Extracting actions...')
-  const fileRef = useRef<HTMLInputElement>(null)
+  const [loadingMsg, setLoadingMsg] = useState('')
+  const imageRef = useRef<HTMLInputElement>(null)
+  const whatsappRef = useRef<HTMLInputElement>(null)
+  const docRef = useRef<HTMLInputElement>(null)
+  const voiceRef = useRef<HTMLInputElement>(null)
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    setFileName(file.name)
-    setLoadingMessage('Parsing WhatsApp chat...')
-    setLoading(true)
-
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const res = await fetch('/api/parse-whatsapp', {
-        method: 'POST',
-        body: formData,
-      })
-      const data = await res.json()
-
-      if (data.error) {
-        alert('Parse error: ' + data.error)
-        setFileName(null)
-      } else {
-        setInput(data.text)
-      }
-    } catch (err) {
-      alert('Failed to read file: ' + err)
-      setFileName(null)
-    }
-
-    setLoading(false)
+  const extractActions = async (text: string) => {
+    const res = await fetch('/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: text }),
+    })
+    const data = await res.json()
+    if (data.error) alert('Error: ' + data.error)
+    setActions(data.actions || [])
   }
 
   const handleExtract = async () => {
     if (!input.trim()) return
     setLoading(true)
-    setLoadingMessage('Extracting actions...')
+    setLoadingMsg('Extracting actions...')
     try {
-      const res = await fetch('/api/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input }),
-      })
-      const data = await res.json()
-      if (data.error) alert('Error: ' + data.error)
-      setActions(data.actions || [])
+      await extractActions(input)
     } catch (err) {
       alert('Something went wrong: ' + err)
     }
     setLoading(false)
+    setLoadingMsg('')
+  }
+
+  const handleImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLoading(true)
+    setLoadingMsg('Reading image...')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/parse-image', { method: 'POST', body: formData })
+      const data = await res.json()
+      if (data.error) { alert('Error: ' + data.error); return }
+      setInput(data.text)
+      setLoadingMsg('Extracting actions...')
+      await extractActions(data.text)
+    } catch (err) {
+      alert('Something went wrong: ' + err)
+    }
+    setLoading(false)
+    setLoadingMsg('')
+  }
+
+  const handleWhatsApp = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLoading(true)
+    setLoadingMsg('Parsing WhatsApp chat...')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/parse-whatsapp', { method: 'POST', body: formData })
+      const data = await res.json()
+      if (data.error) { alert('Error: ' + data.error); return }
+      setInput(data.text)
+      setLoadingMsg('Extracting actions...')
+      await extractActions(data.text)
+    } catch (err) {
+      alert('Something went wrong: ' + err)
+    }
+    setLoading(false)
+    setLoadingMsg('')
+  }
+
+  const handleDocument = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLoading(true)
+    setLoadingMsg(file.name.endsWith('.pdf') ? 'Reading PDF...' : 'Reading document...')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/parse-document', { method: 'POST', body: formData })
+      const data = await res.json()
+      if (data.error) { alert('Error: ' + data.error); return }
+      setInput(data.text)
+      setLoadingMsg('Extracting actions...')
+      await extractActions(data.text)
+    } catch (err) {
+      alert('Something went wrong: ' + err)
+    }
+    setLoading(false)
+    setLoadingMsg('')
+  }
+
+  const handleVoice = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLoading(true)
+    setLoadingMsg('Transcribing voice note...')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/parse-voice', { method: 'POST', body: formData })
+      const data = await res.json()
+      if (data.error) { alert('Error: ' + data.error); return }
+      setInput(data.text)
+      setLoadingMsg('Extracting actions...')
+      await extractActions(data.text)
+    } catch (err) {
+      alert('Something went wrong: ' + err)
+    }
+    setLoading(false)
+    setLoadingMsg('')
   }
 
   const urgent = actions.filter(a => a.urgency === 'urgent')
@@ -84,79 +152,63 @@ export default function Home() {
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Founders Stack</h1>
         <p className="text-gray-500 mb-6">Dump your thoughts. Get structured actions.</p>
 
-        {/* Mode Toggle */}
-        <div className="flex gap-2 mb-4">
+        <textarea
+          className="w-full h-40 p-4 border border-gray-200 rounded-xl text-gray-800 bg-white resize-none focus:outline-none focus:ring-2 focus:ring-black"
+          placeholder="e.g. need to follow up with Ahsan, finish pitch deck by Friday..."
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+        />
+
+        <div className="mt-3 flex gap-3 flex-wrap">
           <button
-            onClick={() => { setMode('text'); setFileName(null); setInput('') }}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${mode === 'text'
-                ? 'bg-black text-white'
-                : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-              }`}
+            onClick={handleExtract}
+            disabled={loading}
+            className="flex-1 bg-black text-white py-3 rounded-xl font-medium hover:bg-gray-800 disabled:opacity-50 transition"
           >
-            ✏️ Text
+            {loading ? loadingMsg : 'Extract Actions'}
           </button>
+
           <button
-            onClick={() => { setMode('whatsapp'); setInput('') }}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${mode === 'whatsapp'
-                ? 'bg-green-600 text-white'
-                : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-              }`}
+            onClick={() => imageRef.current?.click()}
+            disabled={loading}
+            className="px-4 py-3 border border-gray-200 rounded-xl bg-white hover:bg-gray-50 disabled:opacity-50 transition text-sm font-medium text-gray-700"
           >
-            💬 WhatsApp Chat
+            📷 Image
+          </button>
+
+          <button
+            onClick={() => whatsappRef.current?.click()}
+            disabled={loading}
+            className="px-4 py-3 border border-gray-200 rounded-xl bg-white hover:bg-gray-50 disabled:opacity-50 transition text-sm font-medium text-gray-700"
+          >
+            💬 WhatsApp
+          </button>
+
+          <button
+            onClick={() => docRef.current?.click()}
+            disabled={loading}
+            className="px-4 py-3 border border-gray-200 rounded-xl bg-white hover:bg-gray-50 disabled:opacity-50 transition text-sm font-medium text-gray-700"
+          >
+            📄 PDF/Doc
+          </button>
+
+          <button
+            onClick={() => voiceRef.current?.click()}
+            disabled={loading}
+            className="px-4 py-3 border border-gray-200 rounded-xl bg-white hover:bg-gray-50 disabled:opacity-50 transition text-sm font-medium text-gray-700"
+          >
+            🎙️ Voice
           </button>
         </div>
 
-        {/* Text Mode */}
-        {mode === 'text' && (
-          <textarea
-            className="w-full h-40 p-4 border border-gray-200 rounded-xl text-gray-800 bg-white resize-none focus:outline-none focus:ring-2 focus:ring-black"
-            placeholder="e.g. need to follow up with Ahsan, finish pitch deck by Friday, check API costs with Sam..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-          />
-        )}
-
-        {/* WhatsApp Mode */}
-        {mode === 'whatsapp' && (
-          <div
-            onClick={() => fileRef.current?.click()}
-            className="w-full h-40 border-2 border-dashed border-green-300 rounded-xl bg-white flex flex-col items-center justify-center cursor-pointer hover:bg-green-50 transition"
-          >
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".txt"
-              className="hidden"
-              onChange={handleFileChange}
-            />
-            {fileName ? (
-              <>
-                <p className="text-2xl mb-2">💬</p>
-                <p className="font-medium text-gray-800">{fileName}</p>
-                <p className="text-sm text-green-600 mt-1">
-                  {input ? `${input.split('\n').length} messages parsed` : 'Parsing...'}
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="text-2xl mb-2">📂</p>
-                <p className="font-medium text-gray-700">Upload WhatsApp export</p>
-                <p className="text-sm text-gray-400 mt-1">Export chat → Without Media → upload .txt file</p>
-              </>
-            )}
-          </div>
-        )}
-
-        <button
-          onClick={handleExtract}
-          disabled={loading || !input.trim()}
-          className="mt-4 w-full bg-black text-white py-3 rounded-xl font-medium hover:bg-gray-800 disabled:opacity-50 transition"
-        >
-          {loading ? loadingMessage : 'Extract Actions'}
-        </button>
+        <input ref={imageRef} type="file" accept="image/*" className="hidden" onChange={handleImage} />
+        <input ref={whatsappRef} type="file" accept=".txt" className="hidden" onChange={handleWhatsApp} />
+        <input ref={docRef} type="file" accept=".pdf,.docx" className="hidden" onChange={handleDocument} />
+        <input ref={voiceRef} type="file" accept="audio/*" className="hidden" onChange={handleVoice} />
 
         {actions.length > 0 && (
           <div className="mt-8 space-y-6">
+
             {urgent.length > 0 && (
               <div>
                 <h2 className="text-sm font-semibold text-red-600 uppercase tracking-wide mb-3">
@@ -169,6 +221,7 @@ export default function Home() {
                 </div>
               </div>
             )}
+
             {normal.length > 0 && (
               <div>
                 <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
@@ -181,6 +234,7 @@ export default function Home() {
                 </div>
               </div>
             )}
+
           </div>
         )}
       </div>
@@ -194,32 +248,33 @@ function ActionCard({ action }: { action: Action }) {
     medium: 'bg-yellow-100 text-yellow-700 border-yellow-200',
     low: 'bg-green-100 text-green-700 border-green-200',
   }
-  const typeColors: Record<string, string> = {
-    'follow-up': 'bg-blue-100 text-blue-700',
-    'reminder': 'bg-purple-100 text-purple-700',
-    'task': 'bg-gray-100 text-gray-700',
-  }
+
   const typeIcons: Record<string, string> = {
-    'follow-up': '↩️',
-    'reminder': '⏰',
-    'task': '✅',
+    task: '✓',
+    'follow-up': '↩',
+    reminder: '⏰',
   }
 
   return (
     <div className={`bg-white border rounded-xl p-4 shadow-sm ${action.urgency === 'urgent' ? 'border-red-200' : 'border-gray-200'}`}>
       <div className="flex items-start justify-between gap-2">
-        <p className="font-medium text-gray-900">{action.title}</p>
-        <div className="flex gap-1 flex-shrink-0">
-          <span className={`text-xs px-2 py-1 rounded-full font-medium ${typeColors[action.type]}`}>
-            {typeIcons[action.type]} {action.type}
-          </span>
+        <div className="flex items-start gap-2">
+          <span className="text-gray-400 mt-0.5">{typeIcons[action.type || 'task']}</span>
+          <p className="font-medium text-gray-900">{action.title}</p>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          {action.urgency === 'urgent' && (
+            <span className="text-xs px-2 py-1 rounded-full border font-medium bg-orange-100 text-orange-700 border-orange-200">
+              urgent
+            </span>
+          )}
           <span className={`text-xs px-2 py-1 rounded-full border font-medium ${priorityColors[action.priority]}`}>
             {action.priority}
           </span>
         </div>
       </div>
-      {action.owner && <p className="text-sm text-gray-500 mt-1">Owner: {action.owner}</p>}
-      {action.due_date && <p className="text-sm text-gray-500">Due: {action.due_date}</p>}
+      {action.owner && <p className="text-sm text-gray-500 mt-2 ml-6">Owner: {action.owner}</p>}
+      {action.due_date && <p className="text-sm text-gray-500 ml-6">Due: {action.due_date}</p>}
     </div>
   )
 }
