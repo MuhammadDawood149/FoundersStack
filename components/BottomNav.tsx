@@ -15,12 +15,9 @@ export default function BottomNav() {
     const pathname = usePathname()
     const router = useRouter()
 
-    // Hide on auth page
-    if (pathname === '/auth') return null
-
-    async function handleSignOut() {
+    const handleSignOut = async () => {
         await supabase.auth.signOut()
-        router.push('/auth')
+        router.push('/')
     }
 
     return (
@@ -35,21 +32,16 @@ export default function BottomNav() {
                             href={href}
                             className={`flex flex-col items-center justify-center transition-all active:scale-95 ${active ? 'text-zinc-900 font-bold' : 'text-zinc-400 hover:text-zinc-700'}`}
                         >
-                            <span
-                                className="material-symbols-outlined"
-                                style={active ? { fontVariationSettings: "'FILL' 1" } : {}}
-                            >
+                            <span className="material-symbols-outlined" style={active ? { fontVariationSettings: "'FILL' 1" } : {}}>
                                 {icon}
                             </span>
                             <span className="text-[10px] font-medium uppercase tracking-wider">{label}</span>
                         </Link>
                     )
                 })}
-
-                {/* Logout button */}
                 <button
                     onClick={handleSignOut}
-                    className="flex flex-col items-center justify-center transition-all active:scale-95 text-zinc-400 hover:text-red-500"
+                    className="flex flex-col items-center justify-center text-zinc-400 hover:text-zinc-700 active:scale-95 transition-all"
                 >
                     <span className="material-symbols-outlined">logout</span>
                     <span className="text-[10px] font-medium uppercase tracking-wider">Sign Out</span>

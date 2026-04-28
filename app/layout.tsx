@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
-import BottomNav from '../components/BottomNav'
+import BottomNavWrapper from '@/components/BottomNavWrapper'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
@@ -9,11 +9,7 @@ export const metadata: Metadata = {
   description: 'Dump your thoughts. Get structured actions.',
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <head>
@@ -24,7 +20,7 @@ export default function RootLayout({
       </head>
       <body className={`${inter.className} bg-[#f9f9ff] min-h-screen`}>
         {children}
-        <BottomNav />
+        <BottomNavWrapper />
       </body>
     </html>
   )
