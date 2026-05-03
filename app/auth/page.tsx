@@ -1,150 +1,63 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { supabase } from "@/lib/supabase";
 
 export default function AuthPage() {
-    const router = useRouter()
-    const [mode, setMode] = useState<'signin' | 'signup'>('signup')
-    const [fullName, setFullName] = useState('')
-    const [email, setEmail] = useState('')
-    const [password, setPassword] = useState('')
-    const [error, setError] = useState('')
-    const [loading, setLoading] = useState(false)
+  async function handleGoogleLogin() {
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
+  }
 
-    async function handleSubmit() {
-        setError('')
-        setLoading(true)
-
-        try {
-            if (mode === 'signup') {
-                if (!fullName.trim()) {
-                    setError('Please enter your name.')
-                    setLoading(false)
-                    return
-                }
-
-                const { data, error: signUpError } = await supabase.auth.signUp({
-                    email,
-                    password,
-                    options: {
-                        data: { full_name: fullName.trim() }
-                    }
-                })
-
-                if (signUpError) { setError(signUpError.message); setLoading(false); return }
-
-                // If session returned directly (email confirm is off), go straight in
-                if (data.session) {
-                    router.push('/extract')
-                    return
-                }
-
-                // Fallback: try signing in manually
-                const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password })
-                if (signInError) { setError(signInError.message); setLoading(false); return }
-                if (signInData.session) { router.push('/extract'); return }
-
-                setError('Account created but could not sign in. Please sign in manually.')
-                setMode('signin')
-
-            } else {
-                const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password })
-                if (signInError) { setError(signInError.message); setLoading(false); return }
-                if (data.session) { router.push('/extract'); return }
-                setError('Could not sign in. Please try again.')
-            }
-        } catch (err: any) {
-            setError(err.message || 'Something went wrong.')
-        }
-
-        setLoading(false)
-    }
-
-    return (
-        <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
-            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 w-full max-w-md">
-                {/* Logo */}
-                <div className="flex items-center gap-2 mb-8">
-                    <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-                        <span className="text-black font-bold text-sm">FS</span>
-                    </div>
-                    <span className="text-white font-semibold text-lg">Founders Stack</span>
-                </div>
-
-                {/* Title */}
-                <h1 className="text-white text-2xl font-bold mb-1">
-                    {mode === 'signin' ? 'Welcome back' : 'Create your account'}
-                </h1>
-                <p className="text-gray-400 text-sm mb-6">
-                    {mode === 'signin'
-                        ? 'Sign in to your Founders Stack account'
-                        : 'Start managing your startup actions'}
-                </p>
-
-                {/* Fields */}
-                <div className="space-y-4">
-                    {mode === 'signup' && (
-                        <div>
-                            <label className="text-gray-400 text-sm mb-1 block">Full Name</label>
-                            <input
-                                type="text"
-                                placeholder="e.g. Paul or Sam"
-                                value={fullName}
-                                onChange={e => setFullName(e.target.value)}
-                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
-                            />
-                        </div>
-                    )}
-                    <div>
-                        <label className="text-gray-400 text-sm mb-1 block">Email</label>
-                        <input
-                            type="email"
-                            placeholder="you@startup.com"
-                            value={email}
-                            onChange={e => setEmail(e.target.value)}
-                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
-                        />
-                    </div>
-                    <div>
-                        <label className="text-gray-400 text-sm mb-1 block">Password</label>
-                        <input
-                            type="password"
-                            placeholder="••••••••"
-                            value={password}
-                            onChange={e => setPassword(e.target.value)}
-                            onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
-                        />
-                    </div>
-                </div>
-
-                {/* Error */}
-                {error && (
-                    <p className="text-red-400 text-sm mt-3">{error}</p>
-                )}
-
-                {/* Submit */}
-                <button
-                    onClick={handleSubmit}
-                    disabled={loading}
-                    className="w-full mt-6 bg-white text-black font-semibold py-3 rounded-lg hover:bg-gray-100 disabled:opacity-50 transition"
-                >
-                    {loading ? 'Please wait...' : mode === 'signin' ? 'Sign In' : 'Create Account'}
-                </button>
-
-                {/* Toggle */}
-                <p className="text-gray-500 text-sm text-center mt-4">
-                    {mode === 'signin' ? "Don't have an account?" : 'Already have an account?'}{' '}
-                    <button
-                        onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError('') }}
-                        className="text-white hover:underline"
-                    >
-                        {mode === 'signin' ? 'Sign up' : 'Sign in'}
-                    </button>
-                </p>
-            </div>
+  return (
+    <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
+      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 w-full max-w-sm text-center">
+        <div className="flex items-center justify-center gap-2 mb-8">
+          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
+            <span className="text-black font-bold text-xs">FS</span>
+          </div>
+          <span className="text-white font-semibold text-base">
+            Founders Stack
+          </span>
         </div>
-    )
+
+        <h1 className="text-white text-2xl font-bold mb-2">Welcome</h1>
+        <p className="text-gray-400 text-sm mb-8">
+          Sign in to manage your startup actions
+        </p>
+
+        <button
+          onClick={handleGoogleLogin}
+          className="w-full flex items-center justify-center gap-3 border border-gray-700 rounded-xl py-3 px-4 hover:bg-gray-800 transition text-white font-medium"
+        >
+          <svg width="20" height="20" viewBox="0 0 48 48">
+            <path
+              fill="#FFC107"
+              d="M43.6 20H24v8h11.3C33.7 33.1 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C34.1 6.5 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20c11 0 20-9 20-20 0-1.3-.1-2.7-.4-4z"
+            />
+            <path
+              fill="#FF3D00"
+              d="M6.3 14.7l6.6 4.8C14.5 15.1 18.9 12 24 12c3 0 5.8 1.1 7.9 3l5.7-5.7C34.1 6.5 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"
+            />
+            <path
+              fill="#4CAF50"
+              d="M24 44c5.2 0 9.9-1.9 13.5-5l-6.2-5.2C29.5 35.6 26.9 36 24 36c-5.2 0-9.6-2.9-11.3-7l-6.5 5C9.6 39.6 16.3 44 24 44z"
+            />
+            <path
+              fill="#1976D2"
+              d="M43.6 20H24v8h11.3c-.9 2.5-2.6 4.6-4.8 6l6.2 5.2C40.7 35.5 44 30.1 44 24c0-1.3-.1-2.7-.4-4z"
+            />
+          </svg>
+          Continue with Google
+        </button>
+
+        <p className="text-gray-600 text-xs mt-6">
+          By signing in you agree to our terms of service
+        </p>
+      </div>
+    </div>
+  );
 }
