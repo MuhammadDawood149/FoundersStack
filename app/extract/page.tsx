@@ -85,11 +85,13 @@ export default function ExtractPage() {
   const whatsappRef = useRef<HTMLInputElement>(null);
   const docRef = useRef<HTMLInputElement>(null);
   const voiceRef = useRef<HTMLInputElement>(null);
+  const slackRef = useRef<HTMLInputElement>(null);
 
   const tabs = [
     { id: "text", label: "Text", icon: "edit" },
     { id: "image", label: "Image", icon: "image" },
     { id: "whatsapp", label: "WhatsApp", icon: "chat" },
+    { id: "slack", label: "Slack", icon: "tag" },
     { id: "doc", label: "PDF/Doc", icon: "description" },
     { id: "voice", label: "Voice", icon: "mic" },
     { id: "url", label: "URL", icon: "link" },
@@ -390,6 +392,7 @@ export default function ExtractPage() {
         {/* Upload Tabs */}
         {(activeTab === "image" ||
           activeTab === "whatsapp" ||
+          activeTab === "slack" ||
           activeTab === "doc" ||
           activeTab === "voice") && (
           <div>
@@ -397,6 +400,7 @@ export default function ExtractPage() {
               onClick={() => {
                 if (activeTab === "image") imageRef.current?.click();
                 if (activeTab === "whatsapp") whatsappRef.current?.click();
+                if (activeTab === "slack") slackRef.current?.click();
                 if (activeTab === "doc") docRef.current?.click();
                 if (activeTab === "voice") voiceRef.current?.click();
               }}
@@ -421,14 +425,18 @@ export default function ExtractPage() {
                       ? "image"
                       : activeTab === "whatsapp"
                         ? "chat"
-                        : activeTab === "doc"
-                          ? "description"
-                          : "mic"}
+                        : activeTab === "slack"
+                          ? "tag"
+                          : activeTab === "doc"
+                            ? "description"
+                            : "mic"}
                   </span>
                   <p className="font-semibold text-zinc-600 text-sm">
                     {activeTab === "image" && "Drop image or tap to upload"}
                     {activeTab === "whatsapp" &&
                       "Drop exported WhatsApp chat (.txt)"}
+                    {activeTab === "slack" &&
+                      "Upload Slack channel export (.json)"}
                     {activeTab === "doc" && "Drop PDF or Word document"}
                     {activeTab === "voice" && "Upload voice note or recording"}
                   </p>
@@ -437,6 +445,8 @@ export default function ExtractPage() {
                       "Screenshots, whiteboards, handwritten notes"}
                     {activeTab === "whatsapp" &&
                       "WhatsApp → More → Export Chat → Without Media"}
+                    {activeTab === "slack" &&
+                      "Slack → Settings → Import/Export → Export → pick a channel JSON"}
                     {activeTab === "doc" && "Supported: .pdf, .docx"}
                     {activeTab === "voice" &&
                       "Supported: .m4a, .mp3, .wav, .webm"}
@@ -462,6 +472,16 @@ export default function ExtractPage() {
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) handleFileUpload(f, "/api/parse-whatsapp");
+              }}
+            />
+            <input
+              ref={slackRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFileUpload(f, "/api/parse-slack");
               }}
             />
             <input
