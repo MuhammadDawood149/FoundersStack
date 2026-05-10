@@ -1,13 +1,15 @@
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+function getResend() {
+  return new Resend(process.env.RESEND_API_KEY);
+}
 
 export async function sendMemberRemovedEmail(
   memberEmail: string,
   memberName: string,
   teamName: string,
 ) {
-  await resend.emails.send({
+  await getResend().emails.send({
     from: "Founders Stack <onboarding@resend.dev>",
     to: memberEmail,
     subject: `You've been removed from ${teamName}`,
@@ -34,7 +36,7 @@ export async function sendLeaveRequestEmail(
   teamName: string,
   requestId: string,
 ) {
-  await resend.emails.send({
+  await getResend().emails.send({
     from: "Founders Stack <onboarding@resend.dev>",
     to: ownerEmail,
     subject: `${memberName} wants to leave ${teamName}`,
@@ -60,7 +62,7 @@ export async function sendLeaveStatusEmail(
   teamName: string,
   approved: boolean,
 ) {
-  await resend.emails.send({
+  await getResend().emails.send({
     from: "Founders Stack <onboarding@resend.dev>",
     to: memberEmail,
     subject: `Your leave request for ${teamName} was ${approved ? "approved" : "rejected"}`,

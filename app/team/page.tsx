@@ -15,21 +15,29 @@ type Member = {
   user_id: string;
   role: string;
   joined_at: string;
-  profiles?: {
-    full_name: string;
-    email: string;
-    avatar_url: string;
-  };
+  email?: string;
+  full_name?: string;
+};
+
+type LeaveRequest = {
+  id: string;
+  team_id: string;
+  user_id: string;
+  status: string;
+  created_at: string;
 };
 
 export default function TeamPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
-  const [team, setTeam] = useState<Team | null>(null);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [activeTeam, setActiveTeam] = useState<Team | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [teamName, setTeamName] = useState("");
+  const [showCreateForm, setShowCreateForm] = useState(false);
   const [inviteLink, setInviteLink] = useState("");
   const [showInvite, setShowInvite] = useState(false);
   const [toast, setToast] = useState("");
@@ -54,66 +62,90 @@ export default function TeamPage() {
     }
     setUser(user);
 
-    // Check if user is in a team
-    const { data: membership } = await supabase
+    // Get all teams user belongs to
+    const { data: memberships } = await supabase
       .from("team_members2")
       .select("team_id, role")
-      .eq("user_id", user.id)
-      .single();
+      .eq("user_id", user.id);
 
-    if (membership) {
-      // Load team details
-      const { data: teamData } = await supabase
+    if (memberships && memberships.length > 0) {
+      const teamIds = memberships.map((m) => m.team_id);
+      const { data: teamsData } = await supabase
         .from("teams")
         .select("*")
-        .eq("id", membership.team_id)
-        .single();
-      setTeam(teamData);
+        .in("id", teamIds);
 
-      // Load members
-      const { data: membersData } = await supabase
-        .from("team_members2")
-        .select("*")
-        .eq("team_id", membership.team_id);
-      setMembers(membersData || []);
+      setTeams(teamsData || []);
+      if (teamsData && teamsData.length > 0) {
+        setActiveTeam(teamsData[0]);
+        await loadTeamDetails(teamsData[0].id, user.id);
+      }
     }
 
     setLoading(false);
+  };
+
+  const loadTeamDetails = async (teamId: string, userId: string) => {
+    const { data: membersData } = await supabase
+      .from("team_members2")
+      .select("*")
+      .eq("team_id", teamId);
+    setMembers(membersData || []);
+
+    // Load pending leave requests if owner
+    const { data: requests } = await supabase
+      .from("team_leave_requests")
+      .select("*")
+      .eq("team_id", teamId)
+      .eq("status", "pending");
+    setLeaveRequests(requests || []);
+  };
+
+  const switchTeam = async (team: Team) => {
+    setActiveTeam(team);
+    setShowInvite(false);
+    setInviteLink("");
+    await loadTeamDetails(team.id, user.id);
   };
 
   const createTeam = async () => {
     if (!teamName.trim()) return;
     setCreating(true);
     try {
-      // Create team
       const { data: newTeam, error: teamError } = await supabase
         .from("teams")
         .insert({ name: teamName.trim(), created_by: user.id })
         .select()
         .single();
 
-      console.log("Team creation result:", newTeam, teamError);
-
       if (teamError) throw new Error(teamError.message);
 
-      // Add creator as owner
       const { error: memberError } = await supabase
         .from("team_members2")
-        .insert({ team_id: newTeam.id, user_id: user.id, role: "owner" });
-
-      console.log("Member creation error:", memberError);
+        .insert({
+          team_id: newTeam.id,
+          user_id: user.id,
+          role: "owner",
+          email: user.email,
+          full_name: user.user_metadata?.full_name || user.email,
+        });
 
       if (memberError) throw new Error(memberError.message);
 
-      setTeam(newTeam);
+      setTeams((prev) => [...prev, newTeam]);
+      setActiveTeam(newTeam);
       setMembers([
         {
           id: "",
           user_id: user.id,
           role: "owner",
           joined_at: new Date().toISOString(),
+          email: user.email,
+          full_name: user.user_metadata?.full_name,
         },
       ]);
+      setTeamName("");
+      setShowCreateForm(false);
       showToast("Team created!");
     } catch (err: unknown) {
       const message =
@@ -124,11 +156,11 @@ export default function TeamPage() {
   };
 
   const generateInvite = async () => {
-    if (!team) return;
+    if (!activeTeam) return;
     try {
       const { data, error } = await supabase
         .from("team_invites")
-        .insert({ team_id: team.id, created_by: user.id })
+        .insert({ team_id: activeTeam.id, created_by: user.id })
         .select()
         .single();
 
@@ -145,27 +177,101 @@ export default function TeamPage() {
   };
 
   const shareViaWhatsApp = () => {
-    const text = `Hey! Join my team "${team?.name}" on Founders Stack. Click this link to join: ${inviteLink}`;
+    const text = `Hey! Join my team "${activeTeam?.name}" on Founders Stack. Click this link to join: ${inviteLink}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
   };
 
   const shareViaEmail = () => {
     const subject = `Join my team on Founders Stack`;
-    const body = `Hey!\n\nI'd like you to join my team "${team?.name}" on Founders Stack.\n\nClick this link to join:\n${inviteLink}\n\nThe link expires in 7 days.`;
+    const body = `Hey!\n\nI'd like you to join my team "${activeTeam?.name}" on Founders Stack.\n\nClick this link to join:\n${inviteLink}\n\nThe link expires in 7 days.`;
     window.open(
       `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`,
     );
   };
 
-  const removeMember = async (memberId: string, memberUserId: string) => {
-    if (memberUserId === user.id) {
+  const removeMember = async (member: Member) => {
+    if (member.user_id === user.id) {
       alert("You can't remove yourself.");
       return;
     }
     if (!confirm("Remove this member from the team?")) return;
-    await supabase.from("team_members2").delete().eq("id", memberId);
-    setMembers((prev) => prev.filter((m) => m.id !== memberId));
-    showToast("Member removed");
+
+    try {
+      await fetch("/api/team/remove-member", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          memberId: member.id,
+          memberEmail: member.email,
+          memberName: member.full_name || "Member",
+          teamName: activeTeam?.name,
+        }),
+      });
+      setMembers((prev) => prev.filter((m) => m.id !== member.id));
+      showToast("Member removed and notified by email");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Something went wrong";
+      alert("Error: " + message);
+    }
+  };
+
+  const requestLeave = async (team: Team) => {
+    if (!confirm(`Request to leave "${team.name}"? The owner must approve.`))
+      return;
+
+    try {
+      // Find owner
+      const ownerMember = members.find((m) => m.role === "owner");
+      await fetch("/api/team/leave-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          teamId: team.id,
+          teamName: team.name,
+          memberName: user.user_metadata?.full_name || user.email,
+          ownerEmail: ownerMember?.email || "",
+          ownerName: ownerMember?.full_name || "Owner",
+        }),
+      });
+      showToast("Leave request sent to owner");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Something went wrong";
+      alert("Error: " + message);
+    }
+  };
+
+  const handleLeaveResponse = async (
+    request: LeaveRequest,
+    approved: boolean,
+  ) => {
+    try {
+      const member = members.find((m) => m.user_id === request.user_id);
+      await fetch("/api/team/leave-response", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requestId: request.id,
+          approved,
+          memberEmail: member?.email || "",
+          memberName: member?.full_name || "Member",
+          teamName: activeTeam?.name,
+          teamId: request.team_id,
+          userId: request.user_id,
+        }),
+      });
+
+      setLeaveRequests((prev) => prev.filter((r) => r.id !== request.id));
+      if (approved) {
+        setMembers((prev) => prev.filter((m) => m.user_id !== request.user_id));
+      }
+      showToast(approved ? "Member removed and notified" : "Request rejected");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Something went wrong";
+      alert("Error: " + message);
+    }
   };
 
   const copyLink = () => {
@@ -197,65 +303,157 @@ export default function TeamPage() {
             Founders Stack
           </p>
           <h1 className="text-[28px] font-bold tracking-tight text-zinc-900 leading-tight">
-            Team
+            Teams
           </h1>
         </div>
-        <div className="w-9 h-9 rounded-full bg-zinc-900 flex items-center justify-center text-white text-xs font-bold mb-1">
-          FS
-        </div>
+        <button
+          onClick={() => setShowCreateForm(true)}
+          className="mb-1 h-9 px-4 bg-zinc-900 text-white rounded-xl text-xs font-semibold hover:bg-zinc-700 transition flex items-center gap-1"
+        >
+          <span className="material-symbols-outlined text-[16px]">add</span>
+          New Team
+        </button>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 pt-6">
-        {/* No team yet */}
-        {!team && (
-          <div className="bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm">
-            <div className="text-center mb-6">
-              <span className="material-symbols-outlined text-5xl text-zinc-300 mb-3 block">
-                group
-              </span>
-              <h2 className="text-lg font-bold text-zinc-900 mb-1">
-                Create your team
-              </h2>
-              <p className="text-sm text-zinc-500">
-                Collaborate with teammates and share actions
-              </p>
-            </div>
-            <div className="space-y-3">
-              <input
-                type="text"
-                placeholder="Team name e.g. Acme Founders"
-                value={teamName}
-                onChange={(e) => setTeamName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && createTeam()}
-                className="w-full border border-zinc-200 rounded-xl px-4 py-3 text-zinc-800 placeholder-zinc-400 text-sm focus:outline-none focus:border-zinc-400 transition"
-              />
+      <main className="max-w-2xl mx-auto px-4 pt-6 space-y-4">
+        {/* Create Team Form */}
+        {showCreateForm && (
+          <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm">
+            <h2 className="font-bold text-zinc-900 mb-3">Create new team</h2>
+            <input
+              type="text"
+              placeholder="Team name e.g. Acme Founders"
+              value={teamName}
+              onChange={(e) => setTeamName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && createTeam()}
+              className="w-full border border-zinc-200 rounded-xl px-4 py-3 text-zinc-800 placeholder-zinc-400 text-sm focus:outline-none focus:border-zinc-400 transition mb-3"
+            />
+            <div className="flex gap-2">
               <button
                 onClick={createTeam}
                 disabled={creating || !teamName.trim()}
-                className="w-full h-12 bg-black text-white rounded-xl font-semibold text-sm hover:bg-zinc-800 disabled:opacity-40 transition"
+                className="flex-1 h-11 bg-black text-white rounded-xl font-semibold text-sm hover:bg-zinc-800 disabled:opacity-40 transition"
               >
                 {creating ? "Creating..." : "Create Team"}
+              </button>
+              <button
+                onClick={() => {
+                  setShowCreateForm(false);
+                  setTeamName("");
+                }}
+                className="h-11 px-4 border border-zinc-200 rounded-xl text-sm text-zinc-600 hover:bg-zinc-50 transition"
+              >
+                Cancel
               </button>
             </div>
           </div>
         )}
 
-        {/* Team exists */}
-        {team && (
+        {/* No teams */}
+        {teams.length === 0 && !showCreateForm && (
+          <div className="bg-white border border-zinc-200 rounded-2xl p-8 shadow-sm text-center">
+            <span className="material-symbols-outlined text-5xl text-zinc-300 mb-3 block">
+              group
+            </span>
+            <h2 className="text-lg font-bold text-zinc-900 mb-1">
+              No teams yet
+            </h2>
+            <p className="text-sm text-zinc-500 mb-4">
+              Create a team to collaborate with teammates
+            </p>
+            <button
+              onClick={() => setShowCreateForm(true)}
+              className="h-11 px-6 bg-black text-white rounded-xl font-semibold text-sm hover:bg-zinc-800 transition"
+            >
+              Create your first team
+            </button>
+          </div>
+        )}
+
+        {/* Team switcher */}
+        {teams.length > 1 && (
+          <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+            {teams.map((team) => (
+              <button
+                key={team.id}
+                onClick={() => switchTeam(team)}
+                className={`whitespace-nowrap px-4 py-2 rounded-full text-xs font-semibold transition-all ${
+                  activeTeam?.id === team.id
+                    ? "bg-zinc-900 text-white"
+                    : "bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+                }`}
+              >
+                {team.name}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Active team */}
+        {activeTeam && (
           <div className="space-y-4">
             {/* Team card */}
             <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center text-white font-bold text-sm">
-                  {team.name.charAt(0).toUpperCase()}
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center text-white font-bold text-sm">
+                    {activeTeam.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <h2 className="font-bold text-zinc-900">
+                      {activeTeam.name}
+                    </h2>
+                    <p className="text-xs text-zinc-400">
+                      {members.length} member{members.length !== 1 ? "s" : ""}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="font-bold text-zinc-900">{team.name}</h2>
-                  <p className="text-xs text-zinc-400">
-                    {members.length} member{members.length !== 1 ? "s" : ""}
-                  </p>
-                </div>
+                {/* Leave button for non-owners */}
+                {activeTeam.created_by !== user.id && (
+                  <button
+                    onClick={() => requestLeave(activeTeam)}
+                    className="text-xs text-red-500 hover:text-red-700 transition border border-red-200 px-3 py-1 rounded-lg"
+                  >
+                    Request Leave
+                  </button>
+                )}
               </div>
+
+              {/* Pending leave requests (owner only) */}
+              {leaveRequests.length > 0 &&
+                activeTeam.created_by === user.id && (
+                  <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl">
+                    <p className="text-xs font-bold text-yellow-700 mb-2">
+                      ⏳ Pending leave requests
+                    </p>
+                    {leaveRequests.map((req) => (
+                      <div
+                        key={req.id}
+                        className="flex items-center justify-between py-1"
+                      >
+                        <p className="text-xs text-zinc-600">
+                          {members.find((m) => m.user_id === req.user_id)
+                            ?.full_name || "A member"}{" "}
+                          wants to leave
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleLeaveResponse(req, true)}
+                            className="text-xs text-green-600 font-semibold hover:text-green-800"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => handleLeaveResponse(req, false)}
+                            className="text-xs text-red-500 font-semibold hover:text-red-700"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
               {/* Members list */}
               <div className="space-y-2 mb-4">
@@ -272,19 +470,19 @@ export default function TeamPage() {
                       </div>
                       <div>
                         <p className="text-sm font-medium text-zinc-800">
-                          {member.user_id === user.id ? "You" : `Member`}
+                          {member.user_id === user.id
+                            ? "You"
+                            : member.full_name || "Member"}
                         </p>
-                        <p className="text-xs text-zinc-400 capitalize">
-                          {member.role}
+                        <p className="text-xs text-zinc-400">
+                          {member.email || member.role}
                         </p>
                       </div>
                     </div>
                     {member.user_id !== user.id &&
-                      team.created_by === user.id && (
+                      activeTeam.created_by === user.id && (
                         <button
-                          onClick={() =>
-                            removeMember(member.id, member.user_id)
-                          }
+                          onClick={() => removeMember(member)}
                           className="text-xs text-red-500 hover:text-red-700 transition"
                         >
                           Remove
@@ -315,11 +513,9 @@ export default function TeamPage() {
                 <p className="text-xs text-zinc-400 mb-3">
                   Expires in 7 days. Share with your teammate.
                 </p>
-
                 <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2 text-xs text-zinc-600 break-all mb-4">
                   {inviteLink}
                 </div>
-
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     onClick={shareViaWhatsApp}
@@ -354,6 +550,16 @@ export default function TeamPage() {
           </div>
         )}
       </main>
+
+      <style jsx global>{`
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+      `}</style>
     </div>
   );
 }
