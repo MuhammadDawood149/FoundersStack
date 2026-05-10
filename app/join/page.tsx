@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-export default function JoinPage() {
+function JoinContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
@@ -23,7 +23,6 @@ export default function JoinPage() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        // Save token and redirect to auth
         localStorage.setItem("pendingInviteToken", token || "");
         router.push("/auth");
         return;
@@ -35,7 +34,6 @@ export default function JoinPage() {
         return;
       }
 
-      // Find invite
       const { data: invite, error } = await supabase
         .from("team_invites")
         .select("*")
@@ -50,7 +48,6 @@ export default function JoinPage() {
         return;
       }
 
-      // Check if already a member
       const { data: existing } = await supabase
         .from("team_members2")
         .select("id")
@@ -65,12 +62,14 @@ export default function JoinPage() {
         return;
       }
 
-      // Join team
-      await supabase
-        .from("team_members2")
-        .insert({ team_id: invite.team_id, user_id: user.id, role: "member" });
+      await supabase.from("team_members2").insert({
+        team_id: invite.team_id,
+        user_id: user.id,
+        role: "member",
+        email: user.email,
+        full_name: user.user_metadata?.full_name || user.email,
+      });
 
-      // Mark invite as used
       await supabase
         .from("team_invites")
         .update({ used: true })
@@ -111,5 +110,19 @@ export default function JoinPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function JoinPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#f9f9ff] flex items-center justify-center">
+          <div className="text-zinc-400 text-sm">Loading...</div>
+        </div>
+      }
+    >
+      <JoinContent />
+    </Suspense>
   );
 }
