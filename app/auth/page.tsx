@@ -4,14 +4,15 @@ import { supabase } from "@/lib/supabase";
 
 export default function AuthPage() {
   async function handleGoogleLogin() {
+    const params = new URLSearchParams(window.location.search);
+    const redirect = params.get("redirect") || "/extract";
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${window.location.origin}/auth/callback?redirect=${encodeURIComponent(redirect)}`,
       },
     });
   }
-
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
       <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 w-full max-w-sm text-center">

@@ -22,9 +22,11 @@ function JoinContent() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
+
       if (!user) {
+        // Save token and redirect to auth — after login, redirect back to join
         localStorage.setItem("pendingInviteToken", token || "");
-        router.push("/auth");
+        router.push(`/auth?redirect=/join?token=${token}`);
         return;
       }
 

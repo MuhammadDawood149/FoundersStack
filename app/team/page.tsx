@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -36,6 +36,7 @@ export default function TeamPage() {
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [teamName, setTeamName] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [inviteLink, setInviteLink] = useState("");
@@ -44,16 +45,27 @@ export default function TeamPage() {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [toast, setToast] = useState("");
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(""), 3000);
   };
 
-  const loadData = async () => {
+  const loadTeamDetails = useCallback(async (teamId: string) => {
+    const { data: membersData } = await supabase
+      .from("team_members2")
+      .select("*")
+      .eq("team_id", teamId);
+    setMembers(membersData || []);
+
+    const { data: requests } = await supabase
+      .from("team_leave_requests")
+      .select("*")
+      .eq("team_id", teamId)
+      .eq("status", "pending");
+    setLeaveRequests(requests || []);
+  }, []);
+
+  const loadData = useCallback(async () => {
     setLoading(true);
     const {
       data: { user },
@@ -79,33 +91,74 @@ export default function TeamPage() {
       setTeams(teamsData || []);
       if (teamsData && teamsData.length > 0) {
         setActiveTeam(teamsData[0]);
-        await loadTeamDetails(teamsData[0].id, user.id);
+        await loadTeamDetails(teamsData[0].id);
       }
     }
 
     setLoading(false);
-  };
+  }, [router, loadTeamDetails]);
+  // Check if current user was removed from the team
+  useEffect(() => {
+    if (!activeTeam || !user) return;
 
-  const loadTeamDetails = async (teamId: string, userId: string) => {
-    const { data: membersData } = await supabase
-      .from("team_members2")
-      .select("*")
-      .eq("team_id", teamId);
-    setMembers(membersData || []);
+    const channel = supabase
+      .channel(`my_membership_${activeTeam.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "team_members2",
+        },
+        (payload: any) => {
+          // If current user was removed, reload their teams
+          if (payload.old?.user_id === user.id) {
+            showToast("You have been removed from the team");
+            setTimeout(() => loadData(), 1500);
+          }
+        },
+      )
+      .subscribe();
 
-    const { data: requests } = await supabase
-      .from("team_leave_requests")
-      .select("*")
-      .eq("team_id", teamId)
-      .eq("status", "pending");
-    setLeaveRequests(requests || []);
-  };
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeTeam, user, loadData]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Real-time subscription for member changes
+  useEffect(() => {
+    if (!activeTeam) return;
+
+    const channel = supabase
+      .channel(`team_members_${activeTeam.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "team_members2",
+          filter: `team_id=eq.${activeTeam.id}`,
+        },
+        () => {
+          loadTeamDetails(activeTeam.id);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeTeam, loadTeamDetails]);
 
   const switchTeam = async (team: Team) => {
     setActiveTeam(team);
     setShowInvite(false);
     setInviteLink("");
-    await loadTeamDetails(team.id, user.id);
+    await loadTeamDetails(team.id);
   };
 
   const createTeam = async () => {
@@ -155,6 +208,45 @@ export default function TeamPage() {
     setCreating(false);
   };
 
+  const deleteTeam = async () => {
+    if (!activeTeam) return;
+    if (members.length > 1) {
+      alert("Remove all members before deleting the team.");
+      return;
+    }
+    if (!confirm(`Delete "${activeTeam.name}"? This cannot be undone.`)) return;
+
+    setDeleting(true);
+    try {
+      await supabase.from("team_invites").delete().eq("team_id", activeTeam.id);
+      await supabase
+        .from("team_members2")
+        .delete()
+        .eq("team_id", activeTeam.id);
+      await supabase.from("teams").delete().eq("id", activeTeam.id);
+
+      const remainingTeams = teams.filter((t) => t.id !== activeTeam.id);
+      setTeams(remainingTeams);
+
+      if (remainingTeams.length > 0) {
+        setActiveTeam(remainingTeams[0]);
+        await loadTeamDetails(remainingTeams[0].id);
+      } else {
+        setActiveTeam(null);
+        setMembers([]);
+      }
+
+      setShowInvite(false);
+      setInviteLink("");
+      showToast("Team deleted");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Something went wrong";
+      alert("Error: " + message);
+    }
+    setDeleting(false);
+  };
+
   const generateInvite = async () => {
     if (!activeTeam) return;
     try {
@@ -192,7 +284,7 @@ export default function TeamPage() {
       await sendEmail(
         inviteEmail,
         `You're invited to join ${activeTeam?.name} on Founders Stack`,
-        `Hey!\n\nYou've been invited to join the team "${activeTeam?.name}" on Founders Stack.\n\nClick this link to join:\n${inviteLink}\n\nThe link expires in 7 days.\n\nFounders Stack — Turn chaos into actions`,
+        `Hey!\n\nYou've been invited to join the team "${activeTeam?.name}" on Founders Stack.\n\nClick this link to join:\n${inviteLink}\n\nThe link expires in 7 days.\n\nFounders Stack - Turn chaos into actions`,
       );
       showToast("Invite sent!");
       setInviteEmail("");
@@ -212,7 +304,6 @@ export default function TeamPage() {
     if (!confirm("Remove this member from the team?")) return;
 
     try {
-      // Remove from database
       const { error } = await supabase
         .from("team_members2")
         .delete()
@@ -220,7 +311,6 @@ export default function TeamPage() {
 
       if (error) throw new Error(error.message);
 
-      // Send email via EmailJS from frontend
       if (member.email) {
         const { sendEmail } = await import("@/lib/emailjs");
         await sendEmail(
@@ -423,14 +513,27 @@ export default function TeamPage() {
                     </p>
                   </div>
                 </div>
-                {activeTeam.created_by !== user.id && (
-                  <button
-                    onClick={() => requestLeave(activeTeam)}
-                    className="text-xs text-red-500 hover:text-red-700 transition border border-red-200 px-3 py-1 rounded-lg"
-                  >
-                    Request Leave
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {/* Delete team — only owner, only if no other members */}
+                  {activeTeam.created_by === user.id && members.length <= 1 && (
+                    <button
+                      onClick={deleteTeam}
+                      disabled={deleting}
+                      className="text-xs text-red-500 hover:text-red-700 transition border border-red-200 px-3 py-1 rounded-lg disabled:opacity-40"
+                    >
+                      {deleting ? "Deleting..." : "Delete Team"}
+                    </button>
+                  )}
+                  {/* Leave button for non-owners */}
+                  {activeTeam.created_by !== user.id && (
+                    <button
+                      onClick={() => requestLeave(activeTeam)}
+                      className="text-xs text-red-500 hover:text-red-700 transition border border-red-200 px-3 py-1 rounded-lg"
+                    >
+                      Request Leave
+                    </button>
+                  )}
+                </div>
               </div>
 
               {leaveRequests.length > 0 &&
@@ -527,7 +630,6 @@ export default function TeamPage() {
                   {inviteLink}
                 </div>
 
-                {/* Email invite input */}
                 <div className="flex gap-2 mb-3">
                   <input
                     type="email"

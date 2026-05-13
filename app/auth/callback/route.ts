@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
+  const redirect = searchParams.get("redirect") || "/extract";
 
   if (code) {
     const cookieStore = await cookies();
@@ -27,5 +28,7 @@ export async function GET(request: NextRequest) {
     await supabase.auth.exchangeCodeForSession(code);
   }
 
-  return NextResponse.redirect(new URL("/extract", request.url));
+  return NextResponse.redirect(
+    new URL(decodeURIComponent(redirect), request.url),
+  );
 }
