@@ -40,6 +40,8 @@ export default function TeamPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [inviteLink, setInviteLink] = useState("");
   const [showInvite, setShowInvite] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [sendingEmail, setSendingEmail] = useState(false);
   const [toast, setToast] = useState("");
 
   useEffect(() => {
@@ -62,7 +64,6 @@ export default function TeamPage() {
     }
     setUser(user);
 
-    // Get all teams user belongs to
     const { data: memberships } = await supabase
       .from("team_members2")
       .select("team_id, role")
@@ -92,7 +93,6 @@ export default function TeamPage() {
       .eq("team_id", teamId);
     setMembers(membersData || []);
 
-    // Load pending leave requests if owner
     const { data: requests } = await supabase
       .from("team_leave_requests")
       .select("*")
@@ -181,12 +181,27 @@ export default function TeamPage() {
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
   };
 
-  const shareViaEmail = () => {
-    const subject = `Join my team on Founders Stack`;
-    const body = `Hey!\n\nI'd like you to join my team "${activeTeam?.name}" on Founders Stack.\n\nClick this link to join:\n${inviteLink}\n\nThe link expires in 7 days.`;
-    window.open(
-      `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`,
-    );
+  const shareViaEmail = async () => {
+    if (!inviteEmail.trim()) {
+      alert("Please enter an email address");
+      return;
+    }
+    setSendingEmail(true);
+    try {
+      const { sendEmail } = await import("@/lib/emailjs");
+      await sendEmail(
+        inviteEmail,
+        `You're invited to join ${activeTeam?.name} on Founders Stack`,
+        `Hey!\n\nYou've been invited to join the team "${activeTeam?.name}" on Founders Stack.\n\nClick this link to join:\n${inviteLink}\n\nThe link expires in 7 days.\n\nFounders Stack — Turn chaos into actions`,
+      );
+      showToast("Invite sent!");
+      setInviteEmail("");
+    } catch (err: unknown) {
+      console.error("EmailJS error:", err);
+      const message = err instanceof Error ? err.message : JSON.stringify(err);
+      alert("Error: " + message);
+    }
+    setSendingEmail(false);
   };
 
   const removeMember = async (member: Member) => {
@@ -197,21 +212,29 @@ export default function TeamPage() {
     if (!confirm("Remove this member from the team?")) return;
 
     try {
-      await fetch("/api/team/remove-member", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          memberId: member.id,
-          memberEmail: member.email,
-          memberName: member.full_name || "Member",
-          teamName: activeTeam?.name,
-        }),
-      });
+      // Remove from database
+      const { error } = await supabase
+        .from("team_members2")
+        .delete()
+        .eq("id", member.id);
+
+      if (error) throw new Error(error.message);
+
+      // Send email via EmailJS from frontend
+      if (member.email) {
+        const { sendEmail } = await import("@/lib/emailjs");
+        await sendEmail(
+          member.email,
+          `You've been removed from ${activeTeam?.name}`,
+          `Hi ${member.full_name || "there"},\n\nYou have been removed from the team "${activeTeam?.name}" on Founders Stack.\n\nIf you think this was a mistake, please contact your team owner.`,
+        );
+      }
+
       setMembers((prev) => prev.filter((m) => m.id !== member.id));
       showToast("Member removed and notified by email");
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Something went wrong";
+      console.error("Remove error:", err);
+      const message = err instanceof Error ? err.message : JSON.stringify(err);
       alert("Error: " + message);
     }
   };
@@ -221,7 +244,6 @@ export default function TeamPage() {
       return;
 
     try {
-      // Find owner
       const ownerMember = members.find((m) => m.role === "owner");
       await fetch("/api/team/leave-request", {
         method: "POST",
@@ -289,14 +311,12 @@ export default function TeamPage() {
 
   return (
     <div className="min-h-screen bg-[#f9f9ff] pb-24">
-      {/* Toast */}
       {toast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-zinc-900 text-white px-5 py-3 rounded-2xl shadow-xl text-sm font-medium">
           {toast}
         </div>
       )}
 
-      {/* Header */}
       <header className="bg-white flex justify-between items-end px-4 pb-4 w-full h-28 border-b border-zinc-200 sticky top-0 z-30">
         <div>
           <p className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] mb-1">
@@ -316,7 +336,6 @@ export default function TeamPage() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 pt-6 space-y-4">
-        {/* Create Team Form */}
         {showCreateForm && (
           <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm">
             <h2 className="font-bold text-zinc-900 mb-3">Create new team</h2>
@@ -349,7 +368,6 @@ export default function TeamPage() {
           </div>
         )}
 
-        {/* No teams */}
         {teams.length === 0 && !showCreateForm && (
           <div className="bg-white border border-zinc-200 rounded-2xl p-8 shadow-sm text-center">
             <span className="material-symbols-outlined text-5xl text-zinc-300 mb-3 block">
@@ -370,7 +388,6 @@ export default function TeamPage() {
           </div>
         )}
 
-        {/* Team switcher */}
         {teams.length > 1 && (
           <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
             {teams.map((team) => (
@@ -389,10 +406,8 @@ export default function TeamPage() {
           </div>
         )}
 
-        {/* Active team */}
         {activeTeam && (
           <div className="space-y-4">
-            {/* Team card */}
             <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
@@ -408,7 +423,6 @@ export default function TeamPage() {
                     </p>
                   </div>
                 </div>
-                {/* Leave button for non-owners */}
                 {activeTeam.created_by !== user.id && (
                   <button
                     onClick={() => requestLeave(activeTeam)}
@@ -419,7 +433,6 @@ export default function TeamPage() {
                 )}
               </div>
 
-              {/* Pending leave requests (owner only) */}
               {leaveRequests.length > 0 &&
                 activeTeam.created_by === user.id && (
                   <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl">
@@ -455,7 +468,6 @@ export default function TeamPage() {
                   </div>
                 )}
 
-              {/* Members list */}
               <div className="space-y-2 mb-4">
                 {members.map((member) => (
                   <div
@@ -492,7 +504,6 @@ export default function TeamPage() {
                 ))}
               </div>
 
-              {/* Invite button */}
               <button
                 onClick={generateInvite}
                 className="w-full h-11 border border-zinc-200 rounded-xl text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition flex items-center justify-center gap-2"
@@ -504,7 +515,6 @@ export default function TeamPage() {
               </button>
             </div>
 
-            {/* Invite link card */}
             {showInvite && (
               <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm">
                 <h3 className="font-semibold text-zinc-900 mb-1">
@@ -516,7 +526,26 @@ export default function TeamPage() {
                 <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2 text-xs text-zinc-600 break-all mb-4">
                   {inviteLink}
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+
+                {/* Email invite input */}
+                <div className="flex gap-2 mb-3">
+                  <input
+                    type="email"
+                    placeholder="teammate@email.com"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    className="flex-1 border border-zinc-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 transition"
+                  />
+                  <button
+                    onClick={shareViaEmail}
+                    disabled={sendingEmail}
+                    className="h-10 px-4 bg-blue-500 text-white rounded-xl text-xs font-semibold hover:bg-blue-600 disabled:opacity-40 transition"
+                  >
+                    {sendingEmail ? "..." : "Send Email"}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={shareViaWhatsApp}
                     className="h-11 bg-green-500 text-white rounded-xl text-xs font-semibold hover:bg-green-600 transition flex items-center justify-center gap-1"
@@ -527,22 +556,13 @@ export default function TeamPage() {
                     WhatsApp
                   </button>
                   <button
-                    onClick={shareViaEmail}
-                    className="h-11 bg-blue-500 text-white rounded-xl text-xs font-semibold hover:bg-blue-600 transition flex items-center justify-center gap-1"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">
-                      mail
-                    </span>
-                    Email
-                  </button>
-                  <button
                     onClick={copyLink}
                     className="h-11 border border-zinc-200 text-zinc-700 rounded-xl text-xs font-semibold hover:bg-zinc-50 transition flex items-center justify-center gap-1"
                   >
                     <span className="material-symbols-outlined text-[16px]">
                       content_copy
                     </span>
-                    Copy
+                    Copy Link
                   </button>
                 </div>
               </div>
