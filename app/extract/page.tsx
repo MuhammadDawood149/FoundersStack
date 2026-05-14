@@ -86,6 +86,7 @@ export default function ExtractPage() {
   const docRef = useRef<HTMLInputElement>(null);
   const voiceRef = useRef<HTMLInputElement>(null);
   const slackRef = useRef<HTMLInputElement>(null);
+  const spreadsheetRef = useRef<HTMLInputElement>(null);
 
   const tabs = [
     { id: "text", label: "Text", icon: "edit" },
@@ -94,6 +95,7 @@ export default function ExtractPage() {
     { id: "slack", label: "Slack", icon: "tag" },
     { id: "doc", label: "PDF/Doc", icon: "description" },
     { id: "voice", label: "Voice", icon: "mic" },
+    { id: "spreadsheet", label: "Excel/CSV", icon: "table_chart" },
     { id: "url", label: "URL", icon: "link" },
   ];
 
@@ -111,7 +113,12 @@ export default function ExtractPage() {
         x: Math.random() * 75 + 5,
         caught: false,
       };
-      setGameEmojis((prev) => [...prev.slice(-6), newEmoji]);
+      setGameEmojis(
+        (prev: { id: number; emoji: string; x: number; caught: boolean }[]) => [
+          ...prev.slice(-6),
+          newEmoji,
+        ],
+      );
     }, 700);
     return () => {
       clearInterval(msgInterval);
@@ -120,8 +127,9 @@ export default function ExtractPage() {
   };
 
   const catchEmoji = (id: number) => {
-    setGameEmojis((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, caught: true } : e)),
+    setGameEmojis(
+      (prev: { id: number; emoji: string; x: number; caught: boolean }[]) =>
+        prev.map((e) => (e.id === id ? { ...e, caught: true } : e)),
     );
     setScore((prev) => prev + 1);
   };
@@ -241,13 +249,9 @@ export default function ExtractPage() {
           <p className="text-sm text-zinc-400 mb-8 h-5 transition-all duration-500">
             {loadingMsg}
           </p>
-
-          {/* Progress bar */}
           <div className="w-64 h-1.5 bg-zinc-100 rounded-full overflow-hidden mb-10">
             <div className="h-full bg-black rounded-full animate-progress" />
           </div>
-
-          {/* Mini Game */}
           <div className="w-full max-w-xs">
             <p className="text-center text-xs text-zinc-400 mb-3 uppercase tracking-widest font-medium">
               While you wait... tap to catch!
@@ -394,7 +398,8 @@ export default function ExtractPage() {
           activeTab === "whatsapp" ||
           activeTab === "slack" ||
           activeTab === "doc" ||
-          activeTab === "voice") && (
+          activeTab === "voice" ||
+          activeTab === "spreadsheet") && (
           <div>
             <div
               onClick={() => {
@@ -403,6 +408,8 @@ export default function ExtractPage() {
                 if (activeTab === "slack") slackRef.current?.click();
                 if (activeTab === "doc") docRef.current?.click();
                 if (activeTab === "voice") voiceRef.current?.click();
+                if (activeTab === "spreadsheet")
+                  spreadsheetRef.current?.click();
               }}
               className="border-2 border-dashed border-zinc-200 rounded-2xl h-52 flex flex-col items-center justify-center cursor-pointer hover:bg-zinc-50 hover:border-zinc-300 transition mb-4 bg-white"
             >
@@ -429,7 +436,9 @@ export default function ExtractPage() {
                           ? "tag"
                           : activeTab === "doc"
                             ? "description"
-                            : "mic"}
+                            : activeTab === "spreadsheet"
+                              ? "table_chart"
+                              : "mic"}
                   </span>
                   <p className="font-semibold text-zinc-600 text-sm">
                     {activeTab === "image" && "Drop image or tap to upload"}
@@ -439,6 +448,7 @@ export default function ExtractPage() {
                       "Upload Slack channel export (.json)"}
                     {activeTab === "doc" && "Drop PDF or Word document"}
                     {activeTab === "voice" && "Upload voice note or recording"}
+                    {activeTab === "spreadsheet" && "Upload Excel or CSV file"}
                   </p>
                   <p className="text-xs text-zinc-400 mt-2">
                     {activeTab === "image" &&
@@ -450,6 +460,8 @@ export default function ExtractPage() {
                     {activeTab === "doc" && "Supported: .pdf, .docx"}
                     {activeTab === "voice" &&
                       "Supported: .m4a, .mp3, .wav, .webm"}
+                    {activeTab === "spreadsheet" &&
+                      "Supported: .xlsx, .xls, .csv"}
                   </p>
                 </>
               )}
@@ -502,6 +514,16 @@ export default function ExtractPage() {
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) handleFileUpload(f, "/api/parse-voice");
+              }}
+            />
+            <input
+              ref={spreadsheetRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFileUpload(f, "/api/parse-spreadsheet");
               }}
             />
           </div>
