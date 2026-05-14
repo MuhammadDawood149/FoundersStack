@@ -16,6 +16,12 @@ type Action = {
   status: "todo" | "done" | "snoozed";
   confidence?: number;
   created_at: string;
+  user_id: string;
+};
+
+type Team = {
+  id: string;
+  name: string;
 };
 
 type Filter =
@@ -97,6 +103,10 @@ export default function ActionsPage() {
   const [actions, setActions] = useState<Action[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
   const [loading, setLoading] = useState(true);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [teamFilter, setTeamFilter] = useState<string>("all");
+  const [teamMembers, setTeamMembers] = useState<Record<string, string[]>>({});
+  const [currentUserId, setCurrentUserId] = useState<string>("");
   const router = useRouter();
 
   const fetchActions = async () => {
@@ -108,10 +118,38 @@ export default function ActionsPage() {
       setTimeout(() => router.push("/auth"), 0);
       return;
     }
+    setCurrentUserId(user.id);
+
+    // Get user's teams
+    const { data: memberships } = await supabase
+      .from("team_members2")
+      .select("team_id")
+      .eq("user_id", user.id);
+
+    if (memberships && memberships.length > 0) {
+      const teamIds = memberships.map((m) => m.team_id);
+      const { data: teamsData } = await supabase
+        .from("teams")
+        .select("id, name")
+        .in("id", teamIds);
+      setTeams(teamsData || []);
+
+      // Get all members for each team
+      const memberMap: Record<string, string[]> = {};
+      for (const teamId of teamIds) {
+        const { data: members } = await supabase
+          .from("team_members2")
+          .select("user_id")
+          .eq("team_id", teamId);
+        memberMap[teamId] = members?.map((m) => m.user_id) || [];
+      }
+      setTeamMembers(memberMap);
+    }
+
+    // Fetch all actions visible to user
     const { data } = await supabase
       .from("actions")
       .select("*")
-      .eq("user_id", user.id)
       .order("created_at", { ascending: false });
     setActions(data || []);
     setLoading(false);
@@ -132,7 +170,16 @@ export default function ActionsPage() {
     await supabase.from("actions").delete().eq("id", id);
   };
 
-  const filtered = actions.filter((a) => {
+  // Filter by team
+  const teamFilteredActions = actions.filter((action) => {
+    if (teamFilter === "all") return true;
+    if (teamFilter === "mine") return action.user_id === currentUserId;
+    // Filter by specific team — show actions from members of that team
+    const memberIds = teamMembers[teamFilter] || [];
+    return memberIds.includes(action.user_id);
+  });
+
+  const filtered = teamFilteredActions.filter((a) => {
     if (filter === "all") return a.status === "todo";
     if (filter === "urgent")
       return a.urgency === "urgent" && a.status === "todo";
@@ -147,19 +194,21 @@ export default function ActionsPage() {
   });
 
   const counts: Record<Filter, number> = {
-    all: actions.filter((a) => a.status === "todo").length,
-    urgent: actions.filter((a) => a.urgency === "urgent" && a.status === "todo")
-      .length,
-    "follow-ups": actions.filter(
+    all: teamFilteredActions.filter((a) => a.status === "todo").length,
+    urgent: teamFilteredActions.filter(
+      (a) => a.urgency === "urgent" && a.status === "todo",
+    ).length,
+    "follow-ups": teamFilteredActions.filter(
       (a) => a.type === "follow-up" && a.status === "todo",
     ).length,
-    reminders: actions.filter(
+    reminders: teamFilteredActions.filter(
       (a) => a.type === "reminder" && a.status === "todo",
     ).length,
-    tasks: actions.filter((a) => a.type === "task" && a.status === "todo")
-      .length,
-    snoozed: actions.filter((a) => a.status === "snoozed").length,
-    done: actions.filter((a) => a.status === "done").length,
+    tasks: teamFilteredActions.filter(
+      (a) => a.type === "task" && a.status === "todo",
+    ).length,
+    snoozed: teamFilteredActions.filter((a) => a.status === "snoozed").length,
+    done: teamFilteredActions.filter((a) => a.status === "done").length,
   };
 
   return (
@@ -180,17 +229,40 @@ export default function ActionsPage() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 pt-5">
+        {/* Team filter */}
+        {teams.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto pb-3 no-scrollbar">
+            <button
+              onClick={() => setTeamFilter("all")}
+              className={`whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${teamFilter === "all" ? "bg-blue-600 text-white" : "bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}
+            >
+              All Teams
+            </button>
+            <button
+              onClick={() => setTeamFilter("mine")}
+              className={`whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${teamFilter === "mine" ? "bg-blue-600 text-white" : "bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}
+            >
+              Only Mine
+            </button>
+            {teams.map((team) => (
+              <button
+                key={team.id}
+                onClick={() => setTeamFilter(team.id)}
+                className={`whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${teamFilter === team.id ? "bg-blue-600 text-white" : "bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}
+              >
+                {team.name}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Filter Pills */}
         <div className="flex gap-2 overflow-x-auto pb-4 no-scrollbar">
           {FILTERS.map((f) => (
             <button
               key={f.id}
               onClick={() => setFilter(f.id)}
-              className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                filter === f.id
-                  ? "bg-zinc-900 text-white"
-                  : "bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
-              }`}
+              className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 ${filter === f.id ? "bg-zinc-900 text-white" : "bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}
             >
               {f.label}
               {counts[f.id] > 0 && (
@@ -230,6 +302,7 @@ export default function ActionsPage() {
               const tc = typeConfig[action.type] || typeConfig.task;
               const isDone = action.status === "done";
               const isSnoozed = action.status === "snoozed";
+              const isOwn = action.user_id === currentUserId;
 
               return (
                 <div
@@ -244,6 +317,11 @@ export default function ActionsPage() {
                       >
                         {action.type}
                       </span>
+                      {!isOwn && (
+                        <span className="text-xs px-2 py-0.5 rounded-lg font-semibold bg-blue-50 text-blue-600">
+                          teammate
+                        </span>
+                      )}
                       {deadlineState === "overdue" && (
                         <span className="text-xs px-2 py-0.5 rounded-lg font-semibold bg-zinc-200 text-zinc-600 flex items-center gap-1">
                           <span className="material-symbols-outlined text-[12px]">
@@ -307,62 +385,64 @@ export default function ActionsPage() {
                     )}
                   </div>
 
-                  {/* Actions */}
-                  <div className="flex gap-2">
-                    {!isDone && (
+                  {/* Actions — only show for own actions */}
+                  {isOwn && (
+                    <div className="flex gap-2">
+                      {!isDone && (
+                        <button
+                          onClick={() => updateStatus(action.id, "done")}
+                          className="flex-1 h-11 bg-zinc-900 text-white rounded-xl font-semibold text-sm flex items-center justify-center gap-1.5 hover:bg-zinc-700 active:scale-[0.98] transition"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">
+                            check
+                          </span>
+                          Done
+                        </button>
+                      )}
+                      {isDone && (
+                        <button
+                          onClick={() => updateStatus(action.id, "todo")}
+                          className="flex-1 h-11 border border-zinc-300 bg-white text-zinc-700 rounded-xl font-semibold text-sm flex items-center justify-center gap-1.5 hover:bg-zinc-50 active:scale-[0.98] transition"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">
+                            undo
+                          </span>
+                          Undo
+                        </button>
+                      )}
+                      {!isSnoozed && !isDone && (
+                        <button
+                          onClick={() => updateStatus(action.id, "snoozed")}
+                          className="h-11 w-11 border border-zinc-200 bg-white text-zinc-600 rounded-xl flex items-center justify-center hover:bg-zinc-50 active:scale-[0.98] transition"
+                          title="Snooze"
+                        >
+                          <span className="material-symbols-outlined text-[20px]">
+                            snooze
+                          </span>
+                        </button>
+                      )}
+                      {isSnoozed && (
+                        <button
+                          onClick={() => updateStatus(action.id, "todo")}
+                          className="h-11 w-11 border border-zinc-200 bg-white text-zinc-600 rounded-xl flex items-center justify-center hover:bg-zinc-50 active:scale-[0.98] transition"
+                          title="Wake up"
+                        >
+                          <span className="material-symbols-outlined text-[20px]">
+                            alarm_on
+                          </span>
+                        </button>
+                      )}
                       <button
-                        onClick={() => updateStatus(action.id, "done")}
-                        className="flex-1 h-11 bg-zinc-900 text-white rounded-xl font-semibold text-sm flex items-center justify-center gap-1.5 hover:bg-zinc-700 active:scale-[0.98] transition"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">
-                          check
-                        </span>
-                        Done
-                      </button>
-                    )}
-                    {isDone && (
-                      <button
-                        onClick={() => updateStatus(action.id, "todo")}
-                        className="flex-1 h-11 border border-zinc-300 bg-white text-zinc-700 rounded-xl font-semibold text-sm flex items-center justify-center gap-1.5 hover:bg-zinc-50 active:scale-[0.98] transition"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">
-                          undo
-                        </span>
-                        Undo
-                      </button>
-                    )}
-                    {!isSnoozed && !isDone && (
-                      <button
-                        onClick={() => updateStatus(action.id, "snoozed")}
-                        className="h-11 w-11 border border-zinc-200 bg-white text-zinc-600 rounded-xl flex items-center justify-center hover:bg-zinc-50 active:scale-[0.98] transition"
-                        title="Snooze"
+                        onClick={() => deleteAction(action.id)}
+                        className="h-11 w-11 border border-zinc-200 bg-white text-zinc-400 rounded-xl flex items-center justify-center hover:bg-red-50 hover:text-red-500 hover:border-red-200 active:scale-[0.98] transition"
+                        title="Delete"
                       >
                         <span className="material-symbols-outlined text-[20px]">
-                          snooze
+                          delete
                         </span>
                       </button>
-                    )}
-                    {isSnoozed && (
-                      <button
-                        onClick={() => updateStatus(action.id, "todo")}
-                        className="h-11 w-11 border border-zinc-200 bg-white text-zinc-600 rounded-xl flex items-center justify-center hover:bg-zinc-50 active:scale-[0.98] transition"
-                        title="Wake up"
-                      >
-                        <span className="material-symbols-outlined text-[20px]">
-                          alarm_on
-                        </span>
-                      </button>
-                    )}
-                    <button
-                      onClick={() => deleteAction(action.id)}
-                      className="h-11 w-11 border border-zinc-200 bg-white text-zinc-400 rounded-xl flex items-center justify-center hover:bg-red-50 hover:text-red-500 hover:border-red-200 active:scale-[0.98] transition"
-                      title="Delete"
-                    >
-                      <span className="material-symbols-outlined text-[20px]">
-                        delete
-                      </span>
-                    </button>
-                  </div>
+                    </div>
+                  )}
                 </div>
               );
             })}

@@ -3,11 +3,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { logActivity } from "@/lib/activity";
 
 type Team = {
   id: string;
   name: string;
   created_by: string;
+  avatar?: string;
 };
 
 type Member = {
@@ -44,13 +46,53 @@ export default function TeamPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
   const [toast, setToast] = useState("");
-
+  const [joinLink, setJoinLink] = useState("");
+  const [joiningTeam, setJoiningTeam] = useState(false);
+  const [activity, setActivity] = useState<
+    { id: string; action: string; created_at: string }[]
+  >([]);
+  const [pendingInvites, setPendingInvites] = useState<
+    { id: string; token: string; created_at: string }[]
+  >([]);
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(""), 3000);
   };
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const TEAM_EMOJIS = [
+    "👥",
+    "🚀",
+    "⚡",
+    "🔥",
+    "💡",
+    "🎯",
+    "🏆",
+    "💪",
+    "🌟",
+    "🛠️",
+    "📊",
+    "🎨",
+    "🤝",
+    "💼",
+    "🌍",
+  ];
 
   const loadTeamDetails = useCallback(async (teamId: string) => {
+    const { data: activityData } = await supabase
+      .from("team_activity")
+      .select("id, action, created_at")
+      .eq("team_id", teamId)
+      .order("created_at", { ascending: false })
+      .limit(10);
+    setActivity(activityData || []);
+    const { data: invites } = await supabase
+      .from("team_invites")
+      .select("id, token, created_at")
+      .eq("team_id", teamId)
+      .eq("used", false)
+      .gt("expires_at", new Date().toISOString());
+
+    setPendingInvites(invites || []);
     const { data: membersData } = await supabase
       .from("team_members2")
       .select("*")
@@ -65,6 +107,19 @@ export default function TeamPage() {
     setLeaveRequests(requests || []);
   }, []);
 
+  const updateAvatar = async (emoji: string) => {
+    if (!activeTeam) return;
+    await supabase
+      .from("teams")
+      .update({ avatar: emoji })
+      .eq("id", activeTeam.id);
+    setActiveTeam((prev) => (prev ? { ...prev, avatar: emoji } : null));
+    setTeams((prev) =>
+      prev.map((t) => (t.id === activeTeam.id ? { ...t, avatar: emoji } : t)),
+    );
+    setShowEmojiPicker(false);
+    showToast("Avatar updated!");
+  };
   const loadData = useCallback(async () => {
     setLoading(true);
     const {
@@ -200,6 +255,11 @@ export default function TeamPage() {
       setTeamName("");
       setShowCreateForm(false);
       showToast("Team created!");
+      await logActivity(
+        newTeam.id,
+        user.id,
+        `${user.user_metadata?.full_name || user.email} created the team`,
+      );
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Something went wrong";
@@ -246,6 +306,69 @@ export default function TeamPage() {
     }
     setDeleting(false);
   };
+  const handleJoinFromLink = async () => {
+    if (!joinLink.trim()) return;
+    setJoiningTeam(true);
+    try {
+      // Extract token from link
+      const url = new URL(joinLink.trim());
+      const token = url.searchParams.get("token");
+      if (!token) {
+        alert("Invalid invite link");
+        setJoiningTeam(false);
+        return;
+      }
+
+      const { data: invite, error } = await supabase
+        .from("team_invites")
+        .select("*")
+        .eq("token", token)
+        .eq("used", false)
+        .gt("expires_at", new Date().toISOString())
+        .single();
+
+      if (error || !invite) {
+        alert("This invite link is invalid or has expired.");
+        setJoiningTeam(false);
+        return;
+      }
+
+      const { data: existing } = await supabase
+        .from("team_members2")
+        .select("id")
+        .eq("team_id", invite.team_id)
+        .eq("user_id", user.id)
+        .single();
+
+      if (existing) {
+        showToast("You are already a member of this team!");
+        setJoiningTeam(false);
+        return;
+      }
+
+      await supabase.from("team_members2").insert({
+        team_id: invite.team_id,
+        user_id: user.id,
+        role: "member",
+        email: user.email,
+        full_name: user.user_metadata?.full_name || user.email,
+      });
+
+      await supabase
+        .from("team_invites")
+        .update({ used: true })
+        .eq("id", invite.id);
+
+      setJoinLink("");
+      showToast("Joined team successfully!");
+      await loadData();
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Something went wrong";
+      alert("Error: " + message);
+    }
+    setJoiningTeam(false);
+  };
 
   const generateInvite = async () => {
     if (!activeTeam) return;
@@ -261,6 +384,11 @@ export default function TeamPage() {
       const link = `${window.location.origin}/join?token=${data.token}`;
       setInviteLink(link);
       setShowInvite(true);
+      await logActivity(
+        activeTeam.id,
+        user.id,
+        `${user.user_metadata?.full_name || user.email} generated an invite link`,
+      );
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Something went wrong";
@@ -295,7 +423,60 @@ export default function TeamPage() {
     }
     setSendingEmail(false);
   };
+  const transferOwnership = async (member: Member) => {
+    if (
+      !confirm(
+        `Make ${member.full_name || "this member"} the new owner of "${activeTeam?.name}"? You will become a regular member.`,
+      )
+    )
+      return;
 
+    try {
+      // Make selected member the owner
+      await supabase
+        .from("team_members2")
+        .update({ role: "owner" })
+        .eq("id", member.id);
+
+      // Make current user a regular member
+      const myMembership = members.find((m) => m.user_id === user.id);
+      if (myMembership) {
+        await supabase
+          .from("team_members2")
+          .update({ role: "member" })
+          .eq("id", myMembership.id);
+      }
+
+      // Update teams table
+      await supabase
+        .from("teams")
+        .update({ created_by: member.user_id })
+        .eq("id", activeTeam?.id);
+
+      // Update local state
+      setActiveTeam((prev) =>
+        prev ? { ...prev, created_by: member.user_id } : null,
+      );
+      setMembers((prev) =>
+        prev.map((m) => {
+          if (m.id === member.id) return { ...m, role: "owner" };
+          if (m.user_id === user.id) return { ...m, role: "member" };
+          return m;
+        }),
+      );
+
+      showToast(`${member.full_name || "Member"} is now the owner!`);
+      await logActivity(
+        activeTeam!.id,
+        user.id,
+        `${member.full_name || "A member"} became the new owner`,
+      );
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Something went wrong";
+      alert("Error: " + message);
+    }
+  };
   const removeMember = async (member: Member) => {
     if (member.user_id === user.id) {
       alert("You can't remove yourself.");
@@ -321,6 +502,11 @@ export default function TeamPage() {
       }
 
       setMembers((prev) => prev.filter((m) => m.id !== member.id));
+      await logActivity(
+        activeTeam!.id,
+        user.id,
+        `${member.full_name || "A member"} was removed from the team`,
+      );
       showToast("Member removed and notified by email");
     } catch (err: unknown) {
       console.error("Remove error:", err);
@@ -377,6 +563,11 @@ export default function TeamPage() {
       setLeaveRequests((prev) => prev.filter((r) => r.id !== request.id));
       if (approved) {
         setMembers((prev) => prev.filter((m) => m.user_id !== request.user_id));
+        await logActivity(
+          request.team_id,
+          user.id,
+          `${member?.full_name || "A member"} left the team`,
+        );
       }
       showToast(approved ? "Member removed and notified" : "Request rejected");
     } catch (err: unknown) {
@@ -477,7 +668,29 @@ export default function TeamPage() {
             </button>
           </div>
         )}
-
+        {/* Join a team */}
+        <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm">
+          <h3 className="font-semibold text-zinc-900 mb-1">Join a team</h3>
+          <p className="text-xs text-zinc-400 mb-3">
+            Paste an invite link you received
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="https://founders-stack.vercel.app/join?token=..."
+              value={joinLink}
+              onChange={(e) => setJoinLink(e.target.value)}
+              className="flex-1 border border-zinc-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 transition"
+            />
+            <button
+              onClick={handleJoinFromLink}
+              disabled={joiningTeam || !joinLink.trim()}
+              className="h-10 px-4 bg-zinc-900 text-white rounded-xl text-xs font-semibold hover:bg-zinc-700 disabled:opacity-40 transition"
+            >
+              {joiningTeam ? "..." : "Join"}
+            </button>
+          </div>
+        </div>
         {teams.length > 1 && (
           <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
             {teams.map((team) => (
@@ -490,7 +703,7 @@ export default function TeamPage() {
                     : "bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
                 }`}
               >
-                {team.name}
+                {team.avatar || team.name.charAt(0).toUpperCase()} {team.name}
               </button>
             ))}
           </div>
@@ -501,8 +714,33 @@ export default function TeamPage() {
             <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center text-white font-bold text-sm">
-                    {activeTeam.name.charAt(0).toUpperCase()}
+                  <div className="relative">
+                    <button
+                      onClick={() =>
+                        activeTeam.created_by === user.id &&
+                        setShowEmojiPicker(!showEmojiPicker)
+                      }
+                      className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center text-xl hover:bg-zinc-700 transition"
+                      title={
+                        activeTeam.created_by === user.id ? "Change avatar" : ""
+                      }
+                    >
+                      {activeTeam.avatar ||
+                        activeTeam.name.charAt(0).toUpperCase()}
+                    </button>
+                    {showEmojiPicker && activeTeam.created_by === user.id && (
+                      <div className="absolute top-12 left-0 z-50 bg-white border border-zinc-200 rounded-2xl p-3 shadow-xl grid grid-cols-5 gap-2 w-48">
+                        {TEAM_EMOJIS.map((emoji) => (
+                          <button
+                            key={emoji}
+                            onClick={() => updateAvatar(emoji)}
+                            className="text-xl hover:bg-zinc-100 rounded-lg p-1 transition"
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <h2 className="font-bold text-zinc-900">
@@ -596,26 +834,69 @@ export default function TeamPage() {
                     </div>
                     {member.user_id !== user.id &&
                       activeTeam.created_by === user.id && (
-                        <button
-                          onClick={() => removeMember(member)}
-                          className="text-xs text-red-500 hover:text-red-700 transition"
-                        >
-                          Remove
-                        </button>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => transferOwnership(member)}
+                            className="text-xs text-blue-500 hover:text-blue-700 transition"
+                          >
+                            Make Owner
+                          </button>
+                          <button
+                            onClick={() => removeMember(member)}
+                            className="text-xs text-red-500 hover:text-red-700 transition"
+                          >
+                            Remove
+                          </button>
+                        </div>
                       )}
                   </div>
                 ))}
               </div>
-
-              <button
-                onClick={generateInvite}
-                className="w-full h-11 border border-zinc-200 rounded-xl text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition flex items-center justify-center gap-2"
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  person_add
-                </span>
-                Invite Teammate
-              </button>
+              {pendingInvites.length > 0 &&
+                activeTeam.created_by === user.id && (
+                  <div className="mb-4 p-3 bg-zinc-50 border border-zinc-200 rounded-xl">
+                    <p className="text-xs font-bold text-zinc-500 mb-2">
+                      ⏳ Pending invites ({pendingInvites.length})
+                    </p>
+                    {pendingInvites.map((invite) => (
+                      <div
+                        key={invite.id}
+                        className="flex items-center justify-between py-1"
+                      >
+                        <p className="text-xs text-zinc-400">
+                          Sent{" "}
+                          {new Date(invite.created_at).toLocaleDateString()}
+                        </p>
+                        <button
+                          onClick={async () => {
+                            await supabase
+                              .from("team_invites")
+                              .update({ used: true })
+                              .eq("id", invite.id);
+                            setPendingInvites((prev) =>
+                              prev.filter((i) => i.id !== invite.id),
+                            );
+                            showToast("Invite revoked");
+                          }}
+                          className="text-xs text-red-500 hover:text-red-700"
+                        >
+                          Revoke
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              {activeTeam.created_by === user.id && (
+                <button
+                  onClick={generateInvite}
+                  className="w-full h-11 border border-zinc-200 rounded-xl text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition flex items-center justify-center gap-2"
+                >
+                  <span className="material-symbols-outlined text-[18px]">
+                    person_add
+                  </span>
+                  Invite Teammate
+                </button>
+              )}
             </div>
 
             {showInvite && (
@@ -666,6 +947,37 @@ export default function TeamPage() {
                     </span>
                     Copy Link
                   </button>
+                </div>
+              </div>
+            )}
+            {activity.length > 0 && (
+              <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm">
+                <h3 className="font-semibold text-zinc-900 mb-3">
+                  Recent Activity
+                </h3>
+                <div className="space-y-2">
+                  {activity.map((a) => (
+                    <div
+                      key={a.id}
+                      className="flex items-start gap-3 py-2 border-b border-zinc-100 last:border-0"
+                    >
+                      <div className="w-6 h-6 bg-zinc-100 rounded-full flex items-center justify-center shrink-0 mt-0.5">
+                        <span className="material-symbols-outlined text-[14px] text-zinc-500">
+                          history
+                        </span>
+                      </div>
+                      <div>
+                        <p className="text-sm text-zinc-700">{a.action}</p>
+                        <p className="text-xs text-zinc-400 mt-0.5">
+                          {new Date(a.created_at).toLocaleDateString()} at{" "}
+                          {new Date(a.created_at).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
